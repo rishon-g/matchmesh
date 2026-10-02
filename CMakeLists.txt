@@ -1,0 +1,24 @@
+cmake_minimum_required(VERSION 3.25)
+
+project(MatchMesh
+    VERSION 0.1.0
+    DESCRIPTION "Fault-tolerant distributed matchmaking cluster"
+    LANGUAGES CXX)
+
+# ---- Language standard ----
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)   # fail instead of silently using an older standard
+set(CMAKE_CXX_EXTENSIONS OFF)         # use -std=c++20, not GNU's -std=gnu++20
+
+# Write compile_commands.json so editors (VS Code, CLion, clangd) understand the code.
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+# ---- Shared warning flags, applied per target below ----
+add_library(matchmesh_warnings INTERFACE)
+target_compile_options(matchmesh_warnings INTERFACE
+    -Wall -Wextra -Wpedantic -Wshadow -Wconversion)
+
+# ---- Sub-projects ----
+add_subdirectory(core)
+add_subdirectory(node)
+add_subdirectory(loadgen)

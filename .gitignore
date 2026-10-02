@@ -1,0 +1,43 @@
+# ---- C++ / CMake build output ----
+build/
+out/
+cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+compile_commands.json
+CMakeUserPresets.json
+Makefile
+*.ninja
+.ninja_deps
+.ninja_log
+
+# ---- Compiled artifacts ----
+*.o
+*.obj
+*.a
+*.so
+*.so.*
+*.dylib
+*.exe
+*.out
+
+# ---- Generated protobuf / gRPC code (regenerated at build time) ----
+*.pb.h
+*.pb.cc
+
+# ---- Angular / Node (dashboard) ----
+node_modules/
+dist/
+.angular/
+
+# ---- Editors and OS junk ----
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+
+# ---- Local secrets / env ----
+.env

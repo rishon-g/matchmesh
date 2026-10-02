@@ -1,0 +1,8 @@
+.git
+build/
+out/
+cmake-build-*/
+dashboard/node_modules/
+dashboard/dist/
+.vscode/
+.idea/
