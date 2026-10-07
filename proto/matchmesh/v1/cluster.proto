@@ -1,0 +1,104 @@
+// Node-to-node API: failure detection, replication and topology.
+syntax = "proto3";
+
+package matchmesh.v1;
+
+import "matchmesh/v1/common.proto";
+
+service ClusterService {
+  // "I'm alive." Sent to every peer every 500 ms; a peer silent for 1.5 s is
+  // marked dead. Also used by the Phase 1 smoke test as a basic ping.
+  rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+
+  // Primary -> backup: apply one queue change. The primary waits for the
+  // backup to accept before answering the player, so an acknowledged change
+  // survives the primary crashing.
+  rpc Replicate(ReplicateRequest) returns (ReplicateResponse);
+
+  // Snapshot of the cluster: who is alive, who owns which queue, and recent
+  // lobbies. The WebSocket gateway polls this for the dashboard.
+  rpc GetTopology(GetTopologyRequest) returns (GetTopologyResponse);
+}
+
+// ---- Heartbeat ----
+
+message HeartbeatRequest {
+  string node_id = 1;
+  // Membership epoch the sender currently believes in. Lets nodes notice
+  // that someone is behind.
+  uint64 epoch = 2;
+}
+
+message HeartbeatResponse {
+  string node_id = 1;
+  uint64 epoch = 2;
+}
+
+// ---- Replicate ----
+
+// A player joined the queue.
+message EnqueueOp {
+  Player player = 1;
+}
+
+// A player left the queue.
+message CancelOp {
+  string player_id = 1;
+}
+
+// A lobby formed. Replicated as one step so a failover halfway through can't
+// leave some of its players queued and others in the lobby.
+message LobbyFormedOp {
+  Lobby lobby = 1;
+}
+
+message ReplicateRequest {
+  string primary_node_id = 1;
+
+  // The membership epoch the primary is acting under. A backup that has
+  // seen a newer epoch rejects the request, so a stale node that no longer
+  // owns the shard can't overwrite newer state.
+  uint64 epoch = 2;
+
+  QueueKey queue = 3;  // which shard this change belongs to
+
+  // Per-shard counter, +1 per change, so the backup applies changes in order
+  // and can ignore duplicates from retries.
+  uint64 sequence = 4;
+
+  oneof op {
+    EnqueueOp enqueue = 5;
+    CancelOp cancel = 6;
+    LobbyFormedOp lobby_formed = 7;
+  }
+}
+
+message ReplicateResponse {
+  bool accepted = 1;
+  uint64 epoch = 2;  // the backup's epoch, so a stale primary learns it is stale
+}
+
+// ---- GetTopology ----
+
+message GetTopologyRequest {}
+
+message NodeStatus {
+  string node_id = 1;
+  string address = 2;  // host:port of its gRPC server
+  bool alive = 3;
+}
+
+message ShardAssignment {
+  QueueKey queue = 1;
+  string primary_node_id = 2;
+  string backup_node_id = 3;  // next distinct node clockwise on the ring
+  uint32 queued_players = 4;
+}
+
+message GetTopologyResponse {
+  uint64 epoch = 1;
+  string coordinator_node_id = 2;  // the alive node with the lowest ID
+  repeated NodeStatus nodes = 3;
+  repeated ShardAssignment shards = 4;
+  repeated Lobby recent_lobbies = 5;  // feed for the dashboard
+}

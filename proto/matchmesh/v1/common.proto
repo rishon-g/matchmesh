@@ -1,0 +1,38 @@
+// Shared message types used by both MatchMesh services.
+//
+// Rules for evolving these contracts (protobuf wire compatibility):
+//   * Never change or reuse a field number once it has shipped.
+//   * Remove a field by marking its number `reserved`, never by deleting it.
+//   * Every enum starts with an *_UNSPECIFIED = 0 value, because 0 is what a
+//     reader sees when the sender never set the field.
+syntax = "proto3";
+
+package matchmesh.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// A player looking for a lobby.
+message Player {
+  string player_id = 1;  // stable, globally unique
+  int32 rating = 2;      // skill rating (Elo-style)
+}
+
+// Identifies one queue, and is the shard key on the consistent hash ring.
+//
+// Players are sharded by queue, not by player ID: players who must be matched
+// together have to live on the same node, so everything in one queue does.
+message QueueKey {
+  string region = 1;         // e.g. "us-west"
+  string game_mode = 2;      // e.g. "ranked"
+  int32 skill_bracket = 3;   // coarse rating band, derived from Player.rating
+}
+
+// A four-player group the matcher formed from one queue.
+message Lobby {
+  // Unique, so replicating "this lobby formed" is safe to apply exactly once
+  // and a failover can never place a player in two lobbies.
+  string lobby_id = 1;
+  QueueKey queue = 2;
+  repeated Player players = 3;
+  google.protobuf.Timestamp formed_at = 4;
+}
