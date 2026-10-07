@@ -1,0 +1,64 @@
+// Client-facing API: how players (and the load generator) talk to the cluster.
+//
+// A client may call any node. If that node does not own the queue's shard, it
+// forwards the call to the owner, so clients never need to know the topology.
+syntax = "proto3";
+
+package matchmesh.v1;
+
+import "google/protobuf/timestamp.proto";
+import "matchmesh/v1/common.proto";
+
+service MatchmakingService {
+  // Put a player into the queue for a region and game mode.
+  rpc Enqueue(EnqueueRequest) returns (EnqueueResponse);
+
+  // Remove a waiting player from their queue.
+  rpc Cancel(CancelRequest) returns (CancelResponse);
+
+  // Ask whether a player has been placed in a lobby yet.
+  rpc GetLobby(GetLobbyRequest) returns (GetLobbyResponse);
+}
+
+message EnqueueRequest {
+  Player player = 1;
+  string region = 2;
+  string game_mode = 3;
+  // The skill bracket is not sent: the node derives it from player.rating,
+  // so a client cannot pick its own bracket.
+}
+
+message EnqueueResponse {
+  // The queue the player landed in. Clients pass it back in Cancel and
+  // GetLobby so the request can be routed straight to the owning shard.
+  QueueKey queue = 1;
+  google.protobuf.Timestamp enqueued_at = 2;
+}
+
+message CancelRequest {
+  string player_id = 1;
+  QueueKey queue = 2;
+}
+
+message CancelResponse {
+  // False if the player was not waiting (never queued, or already in a lobby).
+  bool cancelled = 1;
+}
+
+message GetLobbyRequest {
+  string player_id = 1;
+  QueueKey queue = 2;
+}
+
+// Where a player currently stands.
+enum PlayerStatus {
+  PLAYER_STATUS_UNSPECIFIED = 0;
+  PLAYER_STATUS_QUEUED = 1;    // still waiting
+  PLAYER_STATUS_IN_LOBBY = 2;  // placed; see GetLobbyResponse.lobby
+  PLAYER_STATUS_NOT_FOUND = 3; // unknown to this queue (never joined, or cancelled)
+}
+
+message GetLobbyResponse {
+  PlayerStatus status = 1;
+  Lobby lobby = 2;  // set only when status == PLAYER_STATUS_IN_LOBBY
+}
