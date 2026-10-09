@@ -14,13 +14,16 @@ docker build -t matchmesh-dev .
 # 2. Open a shell inside it, with this folder mounted at /workspace
 docker run --rm -it -v "$PWD":/workspace matchmesh-dev
 
-# 3. Inside the container: configure, build, run
+# 3. Inside the container: configure, build, test
 cmake --preset debug
 cmake --build --preset debug
-./build/debug/node/matchmesh_node
+ctest --preset debug
+
+# 4. Run a node (it answers Heartbeat pings on port 50051)
+./build/debug/node/matchmesh_node --id node-a --listen 0.0.0.0:50051
 ```
 
-Build presets: `debug`, `release`, `tsan` (ThreadSanitizer).
+Presets (configure, build and test): `debug`, `release`, `tsan` (ThreadSanitizer).
 
 ## Matchmaking engine (`core/`)
 
@@ -36,6 +39,8 @@ A pure C++ library with no networking, so it can be tested in isolation.
   window. The window starts at 50 points and widens by 10 points per second of
   waiting, up to 300. The longest-waiting player's window decides, so long waits
   aren't starved by newcomers.
+
+Unit tests for all of this live in [`tests/core/`](tests/core) (GoogleTest).
 
 ## Service contracts
 
