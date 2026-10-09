@@ -23,3 +23,11 @@ add_subdirectory(core)
 add_subdirectory(proto)   # generated gRPC/Protobuf code
 add_subdirectory(node)
 add_subdirectory(loadgen)
+
+# ---- Tests ----
+# On by default; pass -DMATCHMESH_BUILD_TESTS=OFF to skip them.
+option(MATCHMESH_BUILD_TESTS "Build the GoogleTest suites" ON)
+if(MATCHMESH_BUILD_TESTS)
+    enable_testing()          # lets ctest find the tests registered below
+    add_subdirectory(tests)
+endif()
