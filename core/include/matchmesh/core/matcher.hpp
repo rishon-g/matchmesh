@@ -13,6 +13,7 @@
 // pulls a wider group together instead of being starved by newcomers who
 // still want a narrow match.
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -44,6 +45,10 @@ public:
     // Forms as many lobbies as the queue allows right now and removes their
     // players from the queue. `now` is passed in (rather than read from the
     // clock) so tests can control time exactly.
+    //
+    // Safe to call from several threads at once as long as each call uses a
+    // different queue: the only state shared between calls is the lobby ID
+    // counter, which is atomic. (The queue itself is not thread-safe.)
     std::vector<Lobby> match(SkillQueue& queue, TimePoint now);
 
     [[nodiscard]] const MatchConfig& config() const noexcept;
@@ -54,7 +59,9 @@ private:
 
     std::string lobby_id_prefix_;
     MatchConfig config_;
-    std::uint64_t next_lobby_number_ = 1;
+    // Atomic so workers matching different queues at the same time still
+    // get unique lobby IDs.
+    std::atomic<std::uint64_t> next_lobby_number_{1};
 };
 
 }  // namespace matchmesh::core
