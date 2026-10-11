@@ -1,3 +1,17 @@
-# node: the server process. Later this becomes the gRPC server.
+# node: the server process.
+
+# The node's gRPC services, as a library so the tests can start them in-process
+# without running the whole program.
+add_library(matchmesh_node_lib
+    src/convert.cpp
+    src/cluster_service.cpp
+    src/matchmaking_service.cpp)
+target_include_directories(matchmesh_node_lib PUBLIC include)
+# PUBLIC: code that uses these services also sees core's and proto's types.
+target_link_libraries(matchmesh_node_lib
+    PUBLIC matchmesh_core matchmesh_proto
+    PRIVATE matchmesh_warnings)
+
+# The executable: just argument parsing and server startup.
 add_executable(matchmesh_node src/main.cpp)
-target_link_libraries(matchmesh_node PRIVATE matchmesh_core matchmesh_proto matchmesh_warnings)
+target_link_libraries(matchmesh_node PRIVATE matchmesh_node_lib matchmesh_warnings)

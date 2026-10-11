@@ -3,7 +3,7 @@
 A fault-tolerant distributed matchmaking cluster: five C++20 nodes, gRPC,
 consistent hashing, primary-backup replication and chaos testing.
 
-> Work in progress — currently at Phase 2 (core matchmaking engine).
+> Work in progress — currently at Phase 3 (single-node service and concurrency).
 
 ## Quick start (development container)
 
@@ -19,8 +19,8 @@ cmake --preset debug
 cmake --build --preset debug
 ctest --preset debug
 
-# 4. Run a node (it answers Heartbeat pings on port 50051)
-./build/debug/node/matchmesh_node --id node-a --listen 0.0.0.0:50051
+# 4. Run a node: serves matchmaking and Heartbeat on port 50051
+./build/debug/node/matchmesh_node --id node-a --listen 0.0.0.0:50051 --workers 4
 ```
 
 Presets (configure, build and test): `debug`, `release`, `tsan` (ThreadSanitizer).
@@ -39,8 +39,23 @@ A pure C++ library with no networking, so it can be tested in isolation.
   window. The window starts at 50 points and widens by 10 points per second of
   waiting, up to 300. The longest-waiting player's window decides, so long waits
   aren't starved by newcomers.
+- **`MatchmakingEngine`** holds all of a node's queues (one *shard* per queue key)
+  and runs a fixed pool of `std::jthread` workers that keep forming lobbies in the
+  background. Shards are split between workers by hash, and it is safe to call
+  from many threads at once.
 
 Unit tests for all of this live in [`tests/core/`](tests/core) (GoogleTest).
+
+## Node (`node/`)
+
+Each node is a gRPC server that wraps the engine:
+
+- `MatchmakingService`: `Enqueue`, `Cancel` and `GetLobby` for clients.
+- `ClusterService.Heartbeat`: answers pings from other nodes.
+
+`--workers` sets the number of matchmaking threads (default 4). The node shuts
+down cleanly on Ctrl+C or `docker stop`. End-to-end tests start a real server
+in-process: see [`tests/node/`](tests/node).
 
 ## Service contracts
 
