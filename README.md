@@ -43,8 +43,16 @@ A pure C++ library with no networking, so it can be tested in isolation.
   and runs a fixed pool of `std::jthread` workers that keep forming lobbies in the
   background. Shards are split between workers by hash, and it is safe to call
   from many threads at once.
+- **Lock striping:** every shard has its own mutex, so a busy queue never blocks
+  the others. The shard map is behind a reader/writer lock, and a new player
+  wakes only the one worker that owns their shard. Compared with a single global
+  lock, this roughly doubled end-to-end throughput (about 290k to 580k players/s
+  with 4 client threads and 64 queues, on a 2-core machine).
 
-Unit tests for all of this live in [`tests/core/`](tests/core) (GoogleTest).
+Unit tests for all of this live in [`tests/core/`](tests/core) (GoogleTest). A
+stress suite in [`tests/stress/`](tests/stress) hammers one engine from many
+threads at once and checks that nobody is lost or matched twice. Run it under
+ThreadSanitizer with `ctest --preset tsan -L stress`.
 
 ## Node (`node/`)
 

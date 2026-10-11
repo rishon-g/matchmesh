@@ -7,14 +7,27 @@
 // by hashing the queue key, so every shard always has exactly one worker
 // responsible for matching it.
 //
-// Thread-safe: gRPC handler threads call enqueue / cancel / lookup while the
-// workers match. For now a single mutex guards all shards. That is simple
-// and obviously correct, but it means a busy queue blocks every other queue;
-// per-shard locks (lock striping) remove that bottleneck.
+// Thread-safe, with lock striping: every shard has its own mutex, so work on
+// one queue (a big match pass, a burst of enqueues) never blocks another
+// queue. The locks are:
+//
+//   shards_mutex_   a reader/writer lock on the shard *map*. Finding an
+//                   existing shard takes a shared (read) lock, so lookups
+//                   never block each other; only creating a brand-new shard
+//                   takes the exclusive (write) lock, and that happens once
+//                   per queue.
+//   Shard::mutex    guards one shard's queue and lobbies.
+//   WorkerSignal    one small mutex + condition variable per worker, used
+//                   only to wake that worker when its shards get a player.
+//
+// Lock ordering rule, which rules out deadlock: never hold two of these at
+// once. Each operation finds its shard (map lock released), then locks just
+// that shard.
 //
 // Still no networking here, so the engine can be tested on its own,
 // including under ThreadSanitizer.
 
+#include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <cstddef>
@@ -23,6 +36,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <shared_mutex>
 #include <stop_token>
 #include <string>
 #include <thread>
@@ -67,7 +81,8 @@ public:
     using ClockFn = std::function<TimePoint()>;
 
     // node_id prefixes lobby IDs so they are unique across the cluster.
-    // `clock` lets tests control time; production uses the real clock.
+    // `clock` lets tests control time; production uses the real clock. It may
+    // be called from several threads at once.
     // Throws std::invalid_argument for a bad config.
     explicit MatchmakingEngine(std::string node_id, EngineConfig config = {},
                                ClockFn clock = Clock::now);
@@ -92,39 +107,54 @@ public:
     // The workers do this automatically; tests call it directly.
     std::size_t run_match_pass(TimePoint now);
 
+    // Totals across all shards. Each shard is counted under its own lock, so
+    // while other threads are busy the result is a close snapshot, not an
+    // exact instant.
     [[nodiscard]] std::size_t queued_players() const;
-    [[nodiscard]] std::size_t lobbies_formed() const;
+    [[nodiscard]] std::size_t lobbies_formed() const noexcept;
 
 private:
     // One queue plus the lobbies it has formed, so GetLobby can answer
     // "which lobby is this player in?".
     struct Shard {
-        explicit Shard(QueueKey key) : queue(std::move(key)) {}
+        Shard(QueueKey key, std::size_t key_hash) : queue(std::move(key)), hash(key_hash) {}
 
+        mutable std::mutex mutex;  // guards queue and lobby_of
         SkillQueue queue;
         std::unordered_map<std::string, std::shared_ptr<const Lobby>> lobby_of;
+        const std::size_t hash;    // QueueKeyHash of the key, computed once
     };
 
-    // Match every shard whose hash % stride == index. Caller holds mutex_.
-    std::size_t match_shards_locked(std::size_t index, std::size_t stride, TimePoint now);
-    std::size_t match_shard_locked(Shard& shard, TimePoint now);
+    // Lets enqueue wake just the one worker that owns the shard it touched.
+    struct WorkerSignal {
+        std::mutex mutex;  // guards generation
+        std::condition_variable_any wake;
+        std::uint64_t generation = 0;  // bumped when this worker has new work
+    };
 
+    // Finds the shard for `key`, or nullptr. Never creates one.
+    Shard* find_shard(const QueueKey& key) const;
+    // Finds the shard for `key`, creating it if needed.
+    Shard& find_or_create_shard(const QueueKey& key);
+    // A snapshot of the shards to visit. stride 0 means all of them;
+    // otherwise those whose hash % stride == index.
+    std::vector<Shard*> shards_for(std::size_t index, std::size_t stride) const;
+
+    std::size_t match_shard(Shard& shard, TimePoint now);
+    void wake_owner_of(const Shard& shard);
     void worker_loop(std::stop_token stop, std::size_t index);
 
     const EngineConfig config_;
     const ClockFn clock_;
+    Matcher matcher_;  // safe for concurrent use on different queues
+    std::atomic<std::size_t> lobbies_formed_{0};
 
-    // ---- Everything below is guarded by mutex_ ----
-    mutable std::mutex mutex_;
-    // _any because it can wait on a std::stop_token: a stop request wakes a
-    // sleeping worker immediately instead of after its tick.
-    std::condition_variable_any work_available_;
-    // unique_ptr keeps each Shard at a fixed address as the map grows.
+    mutable std::shared_mutex shards_mutex_;  // guards the map, not the shards
+    // unique_ptr keeps each Shard at a fixed address as the map grows, and
+    // shards are never removed, so a Shard* stays valid for the engine's life.
     std::unordered_map<QueueKey, std::unique_ptr<Shard>, QueueKeyHash> shards_;
-    Matcher matcher_;
-    std::uint64_t enqueue_generation_ = 0;  // bumped on every enqueue to wake workers
-    std::size_t lobbies_formed_ = 0;
 
+    std::vector<std::unique_ptr<WorkerSignal>> signals_;  // one per worker
     // Declared last so it is destroyed first: the workers are stopped and
     // joined before any state they use goes away.
     std::vector<std::jthread> workers_;

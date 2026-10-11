@@ -30,3 +30,12 @@ if(NOT CMAKE_CXX_FLAGS MATCHES "-fsanitize=thread")
         PRIVATE matchmesh_node_lib GTest::gtest_main matchmesh_warnings)
     gtest_discover_tests(matchmesh_node_tests)
 endif()
+
+# ---- Stress tests (many threads at once; meant for the tsan preset) ----
+# Core only, so ThreadSanitizer checks every line. Labelled "stress" so they
+# can be run on their own: ctest --preset tsan -L stress
+add_executable(matchmesh_stress_tests
+    stress/engine_stress_test.cpp)
+target_link_libraries(matchmesh_stress_tests
+    PRIVATE matchmesh_core GTest::gtest_main matchmesh_warnings)
+gtest_discover_tests(matchmesh_stress_tests PROPERTIES LABELS stress)

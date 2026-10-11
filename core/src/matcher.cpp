@@ -116,7 +116,11 @@ std::optional<Lobby> Matcher::form_one(SkillQueue& queue, TimePoint now) {
 }
 
 std::string Matcher::next_lobby_id() {
-    return lobby_id_prefix_ + "-" + std::to_string(next_lobby_number_++);
+    // fetch_add returns the old value and increments in one indivisible step,
+    // so two threads can never receive the same number. "relaxed" is enough:
+    // we only need the numbers to be unique, not ordered with other memory.
+    const std::uint64_t number = next_lobby_number_.fetch_add(1, std::memory_order_relaxed);
+    return lobby_id_prefix_ + "-" + std::to_string(number);
 }
 
 }  // namespace matchmesh::core
