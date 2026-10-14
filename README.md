@@ -48,7 +48,6 @@ A pure C++ library with no networking, so it can be tested in isolation.
   wakes only the one worker that owns their shard. Compared with a single global
   lock, this roughly doubled end-to-end throughput (about 290k to 580k players/s
   with 4 client threads and 64 queues, on a 2-core machine).
-
 - **`HashRing`** decides which node owns each queue, using consistent hashing.
   Each node is placed on the ring at 100 points (virtual nodes) using a stable
   64-bit hash, and a queue belongs to the first node point clockwise from its own
@@ -72,9 +71,35 @@ Each node is a gRPC server that wraps the engine:
 - `MatchmakingService`: `Enqueue`, `Cancel` and `GetLobby` for clients.
 - `ClusterService.Heartbeat`: answers pings from other nodes.
 
-`--workers` sets the number of matchmaking threads (default 4). The node shuts
-down cleanly on Ctrl+C or `docker stop`. End-to-end tests start a real server
-in-process: see [`tests/node/`](tests/node).
+**Any node accepts any request.** The `Router` builds the same hash ring on every
+node from the peer list, so each node knows who owns every queue. A request for
+another node's queue is forwarded to its owner (once: the forwarded copy carries
+an `x-matchmesh-forwarded-by` header and is never forwarded again, so
+misconfigured nodes fail fast instead of looping). The response carries
+`x-matchmesh-served-by`, naming the node that actually handled it. If the owner is
+down the caller gets `UNAVAILABLE` within about 2 s; failover arrives in Phase 5.
+
+Settings come from flags or environment variables:
+
+| Flag | Variable | Example |
+|---|---|---|
+| `--id` | `MATCHMESH_NODE_ID` | `node-a` |
+| `--listen` | `MATCHMESH_LISTEN` | `0.0.0.0:50051` |
+| `--peers` | `MATCHMESH_PEERS` | `node-a=node-a:50051,node-b=node-b:50051,...` |
+| `--workers` | `MATCHMESH_WORKERS` | `4` |
+
+The node shuts down cleanly on Ctrl+C or `docker stop`. `matchmesh_cli` is a small
+client for trying it by hand (`enqueue`, `get-lobby`, `cancel`). End-to-end tests in
+[`tests/node/`](tests/node) run three real nodes in-process.
+
+## Five-node cluster
+
+```bash
+docker compose up -d --build     # build the slim runtime image and start node-a .. node-e
+./scripts/cluster_demo.sh        # every player joins via node-a; watch where they land
+docker compose exec node-a matchmesh_cli --target node-c:50051 enqueue alice 1300 us-west ranked
+docker compose down
+```
 
 ## Service contracts
 
