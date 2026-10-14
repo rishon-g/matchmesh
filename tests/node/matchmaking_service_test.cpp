@@ -11,6 +11,7 @@
 
 #include "matchmesh/core/engine.hpp"
 #include "matchmesh/node/matchmaking_service.hpp"
+#include "matchmesh/node/router.hpp"
 #include "matchmesh/v1/matchmaking.grpc.pb.h"
 
 namespace matchmesh::node {
@@ -62,7 +63,8 @@ protected:
     // Workers tick fast so lobbies form quickly in tests.
     core::MatchmakingEngine engine_{"node-t",
                                     core::EngineConfig{.worker_count = 2, .tick = 10ms}};
-    MatchmakingServiceImpl service_{engine_};
+    Router router_{"node-t", {}};  // a one-node cluster: everything is local
+    MatchmakingServiceImpl service_{engine_, router_};
     std::unique_ptr<grpc::Server> server_;
     std::unique_ptr<v1::MatchmakingService::Stub> stub_;
 };

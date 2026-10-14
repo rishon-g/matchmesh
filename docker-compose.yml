@@ -1,0 +1,52 @@
+# A five-node MatchMesh cluster on one machine.
+#
+#   docker compose up -d --build        start it (first build takes a few minutes)
+#   ./scripts/cluster_demo.sh           watch requests get forwarded
+#   docker compose logs -f node-a       follow one node's log
+#   docker compose down                 stop and remove everything
+#
+# Compose puts all five containers on one private network where each is
+# reachable by its service name (node-a, node-b, ...). Every node gets the
+# same peer list and works out for itself which queues it owns.
+
+x-node: &node
+  build:
+    context: .
+    target: runtime          # the slim stage of the Dockerfile
+  image: matchmesh-node
+  init: true                 # forwards Ctrl+C / docker stop to the node properly
+  restart: "no"              # a crashed node stays down; failover is Phase 5
+  healthcheck:
+    # Healthy once the node answers a Heartbeat ping on its own port.
+    test: ["CMD", "matchmesh_node", "--id", "healthcheck", "--ping", "localhost:50051"]
+    interval: 5s
+    timeout: 6s
+    retries: 3
+    start_period: 2s
+
+x-env: &env
+  MATCHMESH_LISTEN: 0.0.0.0:50051
+  MATCHMESH_WORKERS: "4"
+  MATCHMESH_PEERS: node-a=node-a:50051,node-b=node-b:50051,node-c=node-c:50051,node-d=node-d:50051,node-e=node-e:50051
+
+services:
+  node-a:
+    <<: *node
+    environment: { <<: *env, MATCHMESH_NODE_ID: node-a }
+    ports: ["50051:50051"]
+  node-b:
+    <<: *node
+    environment: { <<: *env, MATCHMESH_NODE_ID: node-b }
+    ports: ["50052:50051"]
+  node-c:
+    <<: *node
+    environment: { <<: *env, MATCHMESH_NODE_ID: node-c }
+    ports: ["50053:50051"]
+  node-d:
+    <<: *node
+    environment: { <<: *env, MATCHMESH_NODE_ID: node-d }
+    ports: ["50054:50051"]
+  node-e:
+    <<: *node
+    environment: { <<: *env, MATCHMESH_NODE_ID: node-e }
+    ports: ["50055:50051"]

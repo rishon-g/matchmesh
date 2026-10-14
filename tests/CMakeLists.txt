@@ -26,7 +26,9 @@ gtest_discover_tests(matchmesh_core_tests)
 # on core (above), where every line is ours.
 if(NOT CMAKE_CXX_FLAGS MATCHES "-fsanitize=thread")
     add_executable(matchmesh_node_tests
-        node/matchmaking_service_test.cpp)
+        node/matchmaking_service_test.cpp
+        node/router_test.cpp
+        node/forwarding_test.cpp)
     target_link_libraries(matchmesh_node_tests
         PRIVATE matchmesh_node_lib GTest::gtest_main matchmesh_warnings)
     gtest_discover_tests(matchmesh_node_tests)
