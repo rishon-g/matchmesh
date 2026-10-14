@@ -32,7 +32,7 @@ TEST(ParsePeersTest, RejectsMalformedEntries) {
 
 TEST(RouterTest, ASingleNodeOwnsEveryQueue) {
     const Router router("node-a", {});
-    EXPECT_EQ(router.ring().node_count(), 1u);
+    EXPECT_EQ(router.members().size(), 1u);
     EXPECT_TRUE(router.is_local(core::make_queue_key("us-west", "ranked", 1300)));
     EXPECT_TRUE(router.is_local(core::make_queue_key("eu", "casual", 800)));
 }
@@ -40,7 +40,7 @@ TEST(RouterTest, ASingleNodeOwnsEveryQueue) {
 TEST(RouterTest, IgnoresItselfInThePeerList) {
     // Every node can be given the same full list.
     const Router router("node-a", parse_peers("node-a=a:1,node-b=b:1,node-c=c:1"));
-    EXPECT_EQ(router.ring().node_count(), 3u);
+    EXPECT_EQ(router.members().size(), 3u);
     EXPECT_EQ(router.peers().size(), 2u);
     EXPECT_FALSE(router.peers().contains("node-a"));
 }

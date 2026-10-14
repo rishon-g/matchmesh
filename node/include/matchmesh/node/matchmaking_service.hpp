@@ -15,6 +15,11 @@
 //   x-matchmesh-forwarded-by  on a request: set by the node that forwarded
 //                             it. A forwarded request is never forwarded
 //                             again, which rules out loops.
+//   x-matchmesh-epoch         on a forwarded request: the membership epoch
+//                             the forwarder routed it under, so a receiver
+//                             that disagrees can tell "views still spreading,
+//                             retry" (different epochs) from "misconfigured"
+//                             (same epoch).
 //   x-matchmesh-served-by     on a response: the node that actually ran the
 //                             request, so clients and tests can see where it
 //                             went.
@@ -34,6 +39,7 @@ namespace matchmesh::node {
 
 inline constexpr std::string_view kForwardedByKey = "x-matchmesh-forwarded-by";
 inline constexpr std::string_view kServedByKey = "x-matchmesh-served-by";
+inline constexpr std::string_view kEpochKey = "x-matchmesh-epoch";
 
 class MatchmakingServiceImpl final : public v1::MatchmakingService::Service {
 public:

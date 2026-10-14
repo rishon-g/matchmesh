@@ -6,7 +6,8 @@ add_library(matchmesh_node_lib
     src/convert.cpp
     src/cluster_service.cpp
     src/matchmaking_service.cpp
-    src/router.cpp)
+    src/router.cpp
+    src/cluster_manager.cpp)
 target_include_directories(matchmesh_node_lib PUBLIC include)
 # PUBLIC: code that uses these services also sees core's and proto's types.
 target_link_libraries(matchmesh_node_lib
