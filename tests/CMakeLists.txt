@@ -9,7 +9,8 @@ add_executable(matchmesh_core_tests
     core/types_test.cpp
     core/skill_queue_test.cpp
     core/matcher_test.cpp
-    core/engine_test.cpp)
+    core/engine_test.cpp
+    core/hash_ring_test.cpp)
 
 # gtest_main supplies main(), so the test files contain only tests.
 target_link_libraries(matchmesh_core_tests

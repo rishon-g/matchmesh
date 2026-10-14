@@ -3,7 +3,7 @@
 A fault-tolerant distributed matchmaking cluster: five C++20 nodes, gRPC,
 consistent hashing, primary-backup replication and chaos testing.
 
-> Work in progress — currently at Phase 3 (single-node service and concurrency).
+> Work in progress — currently at Phase 4 (sharding with consistent hashing).
 
 ## Quick start (development container)
 
@@ -48,6 +48,17 @@ A pure C++ library with no networking, so it can be tested in isolation.
   wakes only the one worker that owns their shard. Compared with a single global
   lock, this roughly doubled end-to-end throughput (about 290k to 580k players/s
   with 4 client threads and 64 queues, on a 2-core machine).
+
+- **`HashRing`** decides which node owns each queue, using consistent hashing.
+  Each node is placed on the ring at 100 points (virtual nodes) using a stable
+  64-bit hash, and a queue belongs to the first node point clockwise from its own
+  hash. The ring depends only on which nodes are in it, so every node computes the
+  same answer. `owners(key, 2)` gives the primary and the next distinct node
+  clockwise, the backup used for replication.
+
+  Measured with 5 nodes and 10,000 queues: every node owns within about 14% of an
+  even share, and removing a node moves only its own queues (about 17%, close to
+  the ideal 1/5), where `hash % node_count` would move about 80%.
 
 Unit tests for all of this live in [`tests/core/`](tests/core) (GoogleTest). A
 stress suite in [`tests/stress/`](tests/stress) hammers one engine from many
