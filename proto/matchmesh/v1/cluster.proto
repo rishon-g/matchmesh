@@ -6,8 +6,9 @@ package matchmesh.v1;
 import "matchmesh/v1/common.proto";
 
 service ClusterService {
-  // "I'm alive." Sent to every peer every 500 ms; a peer silent for 1.5 s is
-  // marked dead. Also used by the Phase 1 smoke test as a basic ping.
+  // "I'm alive, and here is the membership view I hold." Sent to every peer
+  // every 500 ms; a peer silent for 1.5 s is suspected dead. Also used as a
+  // basic ping by the smoke test and the Docker health check.
   rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
 
   // Primary -> backup: apply one queue change. The primary waits for the
@@ -22,16 +23,21 @@ service ClusterService {
 
 // ---- Heartbeat ----
 
+// Heartbeats double as the way membership views spread: each side sends the
+// view (epoch + members) it currently holds, and whoever's is older adopts
+// the newer one. Only the coordinator ever creates a new view.
+
 message HeartbeatRequest {
   string node_id = 1;
-  // Membership epoch the sender currently believes in. Lets nodes notice
-  // that someone is behind.
+  // The sender's current membership view: its epoch and sorted members.
   uint64 epoch = 2;
+  repeated string members = 3;
 }
 
 message HeartbeatResponse {
   string node_id = 1;
   uint64 epoch = 2;
+  repeated string members = 3;
 }
 
 // ---- Replicate ----
@@ -95,6 +101,8 @@ message ShardAssignment {
   uint32 queued_players = 4;
 }
 
+// shards and recent_lobbies are filled in with the dashboard (Phase 7); for
+// now GetTopology reports the membership view and each node's status.
 message GetTopologyResponse {
   uint64 epoch = 1;
   string coordinator_node_id = 2;  // the alive node with the lowest ID

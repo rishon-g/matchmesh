@@ -3,6 +3,7 @@
 //   matchmesh_cli --target node-a:50051 enqueue   <player> <rating> <region> <mode>
 //   matchmesh_cli --target node-a:50051 get-lobby <player> <rating> <region> <mode>
 //   matchmesh_cli --target node-a:50051 cancel    <player> <rating> <region> <mode>
+//   matchmesh_cli --target node-a:50051 topology
 //
 // For get-lobby and cancel, the rating is only used to work out the player's
 // skill bracket (and so their queue), exactly as the server does on enqueue.
@@ -21,6 +22,7 @@
 
 #include "matchmesh/core/types.hpp"
 #include "matchmesh/node/matchmaking_service.hpp"
+#include "matchmesh/v1/cluster.grpc.pb.h"
 #include "matchmesh/v1/matchmaking.grpc.pb.h"
 
 namespace {
@@ -30,7 +32,8 @@ using matchmesh::v1::MatchmakingService;
 void print_usage() {
     std::cerr << "usage: matchmesh_cli --target <host:port> <command> <player> <rating> <region> "
                  "<mode>\n"
-              << "commands: enqueue, get-lobby, cancel\n";
+              << "       matchmesh_cli --target <host:port> topology\n"
+              << "commands: enqueue, get-lobby, cancel, topology\n";
 }
 
 std::string served_by(const grpc::ClientContext& context) {
@@ -52,8 +55,32 @@ int report_error(const grpc::Status& status) {
 
 }  // namespace
 
+// Prints the membership view as the target node sees it.
+int show_topology(const std::string& target) {
+    const auto stub = matchmesh::v1::ClusterService::NewStub(
+        grpc::CreateChannel(target, grpc::InsecureChannelCredentials()));
+    grpc::ClientContext context;
+    prepare(context);
+    matchmesh::v1::GetTopologyResponse response;
+    if (const grpc::Status status =
+            stub->GetTopology(&context, matchmesh::v1::GetTopologyRequest{}, &response);
+        !status.ok()) {
+        return report_error(status);
+    }
+    std::cout << "epoch " << response.epoch() << ", coordinator "
+              << response.coordinator_node_id() << "  (asked " << target << ")\n";
+    for (const auto& node : response.nodes()) {
+        std::cout << "  " << node.node_id() << "  " << (node.alive() ? "member" : "DOWN  ")
+                  << "  " << node.address() << "\n";
+    }
+    return EXIT_SUCCESS;
+}
+
 int main(int argc, char** argv) {
     const std::vector<std::string> args(argv + 1, argv + argc);
+    if (args.size() == 3 && args[0] == "--target" && args[2] == "topology") {
+        return show_topology(args[1]);
+    }
     if (args.size() != 7 || args[0] != "--target") {
         print_usage();
         return EXIT_FAILURE;

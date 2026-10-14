@@ -241,6 +241,27 @@ TEST_F(ForwardingTest, AForwardedRequestIsNeverForwardedAgain) {
     EXPECT_EQ(nodes_.at("node-c").engine->queued_players(), 0u);
 }
 
+TEST_F(ForwardingTest, DisagreementDuringAViewChangeIsRetryable) {
+    // The forwarder routed under epoch 7, but this node is still at epoch 0:
+    // a new membership view is still spreading. That is temporary, so the
+    // answer is UNAVAILABLE ("retry") rather than FAILED_PRECONDITION.
+    const std::string region = region_owned_by("node-c");
+    v1::EnqueueRequest request;
+    request.mutable_player()->set_player_id("alice");
+    request.mutable_player()->set_rating(1300);
+    request.set_region(region);
+    request.set_game_mode("ranked");
+    v1::EnqueueResponse response;
+    grpc::ClientContext context;
+    context.AddMetadata(std::string(kForwardedByKey), "node-b");
+    context.AddMetadata(std::string(kEpochKey), "7");
+
+    const grpc::Status status = stubs_.at("node-a")->Enqueue(&context, request, &response);
+
+    EXPECT_EQ(status.error_code(), grpc::StatusCode::UNAVAILABLE) << status.error_message();
+    EXPECT_NE(status.error_message().find("epoch"), std::string::npos);
+}
+
 TEST(MisconfiguredClusterTest, DisagreeingNodesFailFastInsteadOfLooping) {
     // Two nodes given inconsistent peer lists, so each believes the *other*
     // owns a queue:

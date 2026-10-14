@@ -24,10 +24,14 @@ std::optional<grpc::Status> check_player_and_queue(const std::string& player_id,
     return std::nullopt;
 }
 
-bool was_forwarded(const grpc::ServerContext& context) {
+// A request header's value, if the caller sent it.
+std::optional<std::string> header(const grpc::ServerContext& context, std::string_view key) {
     const auto& metadata = context.client_metadata();
-    return metadata.find(grpc::string_ref(kForwardedByKey.data(), kForwardedByKey.size())) !=
-           metadata.end();
+    const auto it = metadata.find(grpc::string_ref(key.data(), key.size()));
+    if (it == metadata.end()) {
+        return std::nullopt;
+    }
+    return std::string(it->second.data(), it->second.size());
 }
 
 }  // namespace
@@ -41,7 +45,8 @@ grpc::Status MatchmakingServiceImpl::route(grpc::ServerContext* context,
                                            const core::QueueKey& queue, const Request& request,
                                            Response* response, ServeLocally serve_locally,
                                            CallOwner call_owner) {
-    const std::string owner = router_.owner_of(queue);
+    // One routing decision per request, all made under the same view.
+    const auto [owner, epoch] = router_.route(queue);
 
     // 1. Ours: serve it here.
     if (owner == router_.self_id()) {
@@ -49,10 +54,20 @@ grpc::Status MatchmakingServiceImpl::route(grpc::ServerContext* context,
         return serve_locally();
     }
 
-    // 2. Someone else's, but it was already forwarded once. The two nodes
-    //    disagree about who owns this queue (they were given different peer
-    //    lists). Refuse rather than bounce it around or split the queue.
-    if (was_forwarded(*context)) {
+    // 2. Someone else's, but it was already forwarded once, so the forwarder
+    //    and this node disagree about the owner. Never forward twice: refuse
+    //    rather than bounce it around or split the queue across nodes.
+    if (header(*context, kForwardedByKey)) {
+        const std::string their_epoch = header(*context, kEpochKey).value_or("");
+        if (!their_epoch.empty() && their_epoch != std::to_string(epoch)) {
+            // Different epochs: a new membership view is still spreading
+            // (this takes milliseconds). Safe to retry shortly.
+            return {grpc::StatusCode::UNAVAILABLE,
+                    "membership is changing (forwarded under epoch " + their_epoch +
+                        ", this node is at epoch " + std::to_string(epoch) + "); retry"};
+        }
+        // Same epoch yet different owners: the nodes were configured with
+        // different peer lists. Retrying won't help.
         return {grpc::StatusCode::FAILED_PRECONDITION,
                 router_.self_id() + " does not own queue " + core::to_string(queue) +
                     " (it believes " + owner + " does); check every node's peer list"};
@@ -61,6 +76,7 @@ grpc::Status MatchmakingServiceImpl::route(grpc::ServerContext* context,
     // 3. Someone else's: forward it to the owner, once.
     grpc::ClientContext outgoing;
     outgoing.AddMetadata(std::string(kForwardedByKey), router_.self_id());
+    outgoing.AddMetadata(std::string(kEpochKey), std::to_string(epoch));
     // Never wait longer than the original caller is willing to, and never
     // longer than our own forwarding limit.
     outgoing.set_deadline(std::min(context->deadline(), std::chrono::system_clock::now() +

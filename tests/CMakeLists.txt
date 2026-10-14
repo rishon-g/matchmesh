@@ -10,7 +10,8 @@ add_executable(matchmesh_core_tests
     core/skill_queue_test.cpp
     core/matcher_test.cpp
     core/engine_test.cpp
-    core/hash_ring_test.cpp)
+    core/hash_ring_test.cpp
+    core/membership_test.cpp)
 
 # gtest_main supplies main(), so the test files contain only tests.
 target_link_libraries(matchmesh_core_tests
@@ -28,7 +29,8 @@ if(NOT CMAKE_CXX_FLAGS MATCHES "-fsanitize=thread")
     add_executable(matchmesh_node_tests
         node/matchmaking_service_test.cpp
         node/router_test.cpp
-        node/forwarding_test.cpp)
+        node/forwarding_test.cpp
+        node/cluster_test.cpp)
     target_link_libraries(matchmesh_node_tests
         PRIVATE matchmesh_node_lib GTest::gtest_main matchmesh_warnings)
     gtest_discover_tests(matchmesh_node_tests)

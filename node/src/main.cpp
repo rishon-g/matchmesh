@@ -6,7 +6,9 @@
 //       Serve MatchmakingService (Enqueue, Cancel, GetLobby) and
 //       ClusterService.Heartbeat, with a pool of matchmaking worker threads.
 //       With --peers, queues are spread over all listed nodes and requests
-//       for another node's queue are forwarded to it.
+//       for another node's queue are forwarded to it. Nodes heartbeat each
+//       other every 500 ms; a node silent for 1.5 s is dropped from the
+//       membership and its queues move to the next node on the ring.
 //   matchmesh_node --id node-b --ping node-a:50051
 //       Send one Heartbeat to a peer, print the reply, exit 0 on success.
 //
@@ -28,12 +30,15 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <vector>
 
 #include <pthread.h>
 #include <grpcpp/grpcpp.h>
 
 #include "matchmesh/core/engine.hpp"
+#include "matchmesh/core/membership.hpp"
 #include "matchmesh/core/version.hpp"
+#include "matchmesh/node/cluster_manager.hpp"
 #include "matchmesh/node/cluster_service.hpp"
 #include "matchmesh/node/matchmaking_service.hpp"
 #include "matchmesh/node/router.hpp"
@@ -140,12 +145,21 @@ int run_server(const Options& options) {
         return EXIT_FAILURE;
     }
 
+    std::vector<std::string> all_nodes{options.node_id};
+    for (const auto& [id, address] : peers) {
+        all_nodes.push_back(id);
+    }
+
     // Declaration order matters: destroyed in reverse, so the server stops
-    // before the services it calls, and those before what they use.
-    const matchmesh::node::Router router(options.node_id, peers);
+    // first, then the services and the cluster manager's threads, and only
+    // then what they all use (engine, router, membership).
+    matchmesh::core::Membership membership(options.node_id, all_nodes,
+                                           matchmesh::core::Clock::now());
+    matchmesh::node::Router router(options.node_id, peers);
     matchmesh::core::MatchmakingEngine engine(
         options.node_id, matchmesh::core::EngineConfig{.worker_count = options.workers});
-    matchmesh::node::ClusterServiceImpl cluster_service(options.node_id);
+    matchmesh::node::ClusterManager cluster(membership, router, options.listen_address);
+    matchmesh::node::ClusterServiceImpl cluster_service(cluster);
     matchmesh::node::MatchmakingServiceImpl matchmaking_service(engine, router);
 
     grpc::ServerBuilder builder;
@@ -160,12 +174,15 @@ int run_server(const Options& options) {
     std::cout << "matchmesh_node v" << matchmesh::core::version() << " [" << options.node_id
               << "] listening on " << options.listen_address << " with " << options.workers
               << " matchmaking workers" << std::endl;
-    std::cout << "cluster: " << router.ring().node_count() << " node(s), " << options.node_id
+    std::cout << "cluster: " << router.members().size() << " node(s), " << options.node_id
               << " (self)";
     for (const auto& [id, address] : router.peers()) {
         std::cout << ", " << id << " @ " << address;
     }
     std::cout << std::endl;
+
+    // Start heartbeating only once our own server can answer peers.
+    cluster.start();
 
     // Waits for a shutdown signal, then lets in-flight calls finish (up to
     // 2 s) and stops the server, which makes server->Wait() below return.
@@ -177,6 +194,7 @@ int run_server(const Options& options) {
     });
 
     server->Wait();
+    cluster.stop();
     std::cout << "stopped after forming " << engine.lobbies_formed() << " lobbies" << std::endl;
     return EXIT_SUCCESS;
 }
@@ -208,7 +226,8 @@ int run_ping(const Options& options) {
         return EXIT_FAILURE;
     }
     std::cout << "pong from " << response.node_id() << " at " << options.ping_target << " in "
-              << static_cast<double>(elapsed.count()) / 1000.0 << " ms\n";
+              << static_cast<double>(elapsed.count()) / 1000.0 << " ms (epoch "
+              << response.epoch() << ", " << response.members_size() << " members)\n";
     return EXIT_SUCCESS;
 }
 

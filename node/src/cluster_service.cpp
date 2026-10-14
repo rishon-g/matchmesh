@@ -1,19 +1,20 @@
 #include "matchmesh/node/cluster_service.hpp"
 
-#include <iostream>
-#include <utility>
-
 namespace matchmesh::node {
 
-ClusterServiceImpl::ClusterServiceImpl(std::string node_id) : node_id_(std::move(node_id)) {}
+ClusterServiceImpl::ClusterServiceImpl(ClusterManager& manager) : manager_(manager) {}
 
-grpc::Status ClusterServiceImpl::Heartbeat(grpc::ServerContext* context,
+grpc::Status ClusterServiceImpl::Heartbeat(grpc::ServerContext* /*context*/,
                                            const v1::HeartbeatRequest* request,
                                            v1::HeartbeatResponse* response) {
-    std::cout << "heartbeat from " << request->node_id() << " (" << context->peer() << ")"
-              << std::endl;
-    response->set_node_id(node_id_);
-    response->set_epoch(0);  // membership epochs arrive in Phase 5
+    manager_.on_heartbeat(*request, response);
+    return grpc::Status::OK;
+}
+
+grpc::Status ClusterServiceImpl::GetTopology(grpc::ServerContext* /*context*/,
+                                             const v1::GetTopologyRequest* /*request*/,
+                                             v1::GetTopologyResponse* response) {
+    manager_.fill_topology(response);
     return grpc::Status::OK;
 }
 
