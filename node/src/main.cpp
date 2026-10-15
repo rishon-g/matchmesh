@@ -6,9 +6,11 @@
 //       Serve MatchmakingService (Enqueue, Cancel, GetLobby) and
 //       ClusterService.Heartbeat, with a pool of matchmaking worker threads.
 //       With --peers, queues are spread over all listed nodes and requests
-//       for another node's queue are forwarded to it. Nodes heartbeat each
-//       other every 500 ms; a node silent for 1.5 s is dropped from the
-//       membership and its queues move to the next node on the ring.
+//       for another node's queue are forwarded to it. Every change to a
+//       queue is copied to its backup (the next node on the ring) before it
+//       is applied. Nodes heartbeat each other every 500 ms; a node silent
+//       for 1.5 s is dropped from the membership and its backup takes over
+//       its queues with everyone still in them.
 //   matchmesh_node --id node-b --ping node-a:50051
 //       Send one Heartbeat to a peer, print the reply, exit 0 on success.
 //
@@ -26,6 +28,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <random>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -41,7 +44,9 @@
 #include "matchmesh/node/cluster_manager.hpp"
 #include "matchmesh/node/cluster_service.hpp"
 #include "matchmesh/node/matchmaking_service.hpp"
+#include "matchmesh/node/replication_client.hpp"
 #include "matchmesh/node/router.hpp"
+#include "matchmesh/node/shard_manager.hpp"
 #include "matchmesh/v1/cluster.grpc.pb.h"
 
 namespace {
@@ -126,6 +131,20 @@ bool parse_args(int argc, char** argv, Options& out) {
     return out.listen_address.empty() != out.ping_target.empty();
 }
 
+// A random, non-zero number identifying this run of the process, so peers
+// can tell a restarted node (which has lost its memory) from one that kept
+// running.
+std::uint64_t new_incarnation() {
+    std::random_device device;
+    std::uint64_t value = 0;
+    while (value == 0) {
+        value = (std::uint64_t{device()} << 32) ^ std::uint64_t{device()} ^
+                static_cast<std::uint64_t>(
+                    std::chrono::steady_clock::now().time_since_epoch().count());
+    }
+    return value;
+}
+
 int run_server(const Options& options) {
     // Route Ctrl+C (SIGINT) and `docker stop` (SIGTERM) to one dedicated
     // thread instead of interrupting whichever thread happens to be running.
@@ -151,16 +170,22 @@ int run_server(const Options& options) {
     }
 
     // Declaration order matters: destroyed in reverse, so the server stops
-    // first, then the services and the cluster manager's threads, and only
-    // then what they all use (engine, router, membership).
+    // first, then the services, the cluster manager's and shard manager's
+    // threads, the engine's workers, and only then what they all use
+    // (replication client, router, membership).
+    const std::uint64_t incarnation = new_incarnation();
     matchmesh::core::Membership membership(options.node_id, all_nodes,
-                                           matchmesh::core::Clock::now());
+                                           matchmesh::core::Clock::now(), {}, incarnation);
     matchmesh::node::Router router(options.node_id, peers);
+    matchmesh::node::ReplicationClient replication(router);
     matchmesh::core::MatchmakingEngine engine(
-        options.node_id, matchmesh::core::EngineConfig{.worker_count = options.workers});
-    matchmesh::node::ClusterManager cluster(membership, router, options.listen_address);
-    matchmesh::node::ClusterServiceImpl cluster_service(cluster);
-    matchmesh::node::MatchmakingServiceImpl matchmaking_service(engine, router);
+        options.node_id, matchmesh::core::EngineConfig{.worker_count = options.workers},
+        matchmesh::core::Clock::now, &replication);
+    matchmesh::node::ShardManager shards(engine, router, replication, incarnation);
+    matchmesh::node::ClusterManager cluster(membership, router, options.listen_address, {},
+                                            &shards);
+    matchmesh::node::ClusterServiceImpl cluster_service(cluster, &shards);
+    matchmesh::node::MatchmakingServiceImpl matchmaking_service(engine, router, &shards);
 
     grpc::ServerBuilder builder;
     builder.AddListeningPort(options.listen_address, grpc::InsecureServerCredentials());
@@ -182,6 +207,7 @@ int run_server(const Options& options) {
     std::cout << std::endl;
 
     // Start heartbeating only once our own server can answer peers.
+    shards.start();
     cluster.start();
 
     // Waits for a shutdown signal, then lets in-flight calls finish (up to
@@ -195,6 +221,7 @@ int run_server(const Options& options) {
 
     server->Wait();
     cluster.stop();
+    shards.stop();
     std::cout << "stopped after forming " << engine.lobbies_formed() << " lobbies" << std::endl;
     return EXIT_SUCCESS;
 }

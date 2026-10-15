@@ -3,6 +3,7 @@ syntax = "proto3";
 
 package matchmesh.v1;
 
+import "google/protobuf/timestamp.proto";
 import "matchmesh/v1/common.proto";
 
 service ClusterService {
@@ -11,9 +12,11 @@ service ClusterService {
   // basic ping by the smoke test and the Docker health check.
   rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
 
-  // Primary -> backup: apply one queue change. The primary waits for the
-  // backup to accept before answering the player, so an acknowledged change
-  // survives the primary crashing.
+  // Primary -> backup: apply one queue change, or replace the backup's copy
+  // with a full snapshot. The primary waits for the backup to accept before
+  // applying the change itself or answering the player, so an acknowledged
+  // change survives the primary crashing. Also used to hand a whole queue to
+  // its new owner after a membership change.
   rpc Replicate(ReplicateRequest) returns (ReplicateResponse);
 
   // Snapshot of the cluster: who is alive, who owns which queue, and recent
@@ -26,18 +29,33 @@ service ClusterService {
 // Heartbeats double as the way membership views spread: each side sends the
 // view (epoch + members) it currently holds, and whoever's is older adopts
 // the newer one. Only the coordinator ever creates a new view.
+//
+// Request and response carry the same information about their sender.
 
 message HeartbeatRequest {
   string node_id = 1;
-  // The sender's current membership view: its epoch and sorted members.
+  // The sender's current membership view: its epoch, sorted members, and
+  // the incarnation each member had when the view was published.
   uint64 epoch = 2;
   repeated string members = 3;
+  map<string, uint64> incarnations = 4;
+  // Random number the sender picked when its process started. A new one
+  // means it restarted (and lost its memory), even if nobody noticed it go.
+  uint64 incarnation = 5;
+  // The latest epoch for which the sender has finished handing every queue
+  // it holds to that queue's owner. A queue's new owner starts serving only
+  // once every member reports the current epoch here. Unset until the
+  // sender has finished for any epoch.
+  optional uint64 synced_epoch = 6;
 }
 
 message HeartbeatResponse {
   string node_id = 1;
   uint64 epoch = 2;
   repeated string members = 3;
+  map<string, uint64> incarnations = 4;
+  uint64 incarnation = 5;
+  optional uint64 synced_epoch = 6;
 }
 
 // ---- Replicate ----
@@ -45,6 +63,7 @@ message HeartbeatResponse {
 // A player joined the queue.
 message EnqueueOp {
   Player player = 1;
+  google.protobuf.Timestamp enqueued_at = 2;  // so the copy keeps their wait time
 }
 
 // A player left the queue.
@@ -58,30 +77,50 @@ message LobbyFormedOp {
   Lobby lobby = 1;
 }
 
-message ReplicateRequest {
-  string primary_node_id = 1;
+// A player waiting in a queue, for snapshots.
+message WaitingPlayer {
+  Player player = 1;
+  google.protobuf.Timestamp enqueued_at = 2;
+}
 
-  // The membership epoch the primary is acting under. A backup that has
-  // seen a newer epoch rejects the request, so a stale node that no longer
-  // owns the shard can't overwrite newer state.
+// A complete copy of one queue: everyone waiting and every lobby it formed.
+// Sent when a backup is new or may have missed changes, and to hand a queue
+// to its new owner. ReplicateRequest.sequence is the last change it includes.
+message ShardSnapshot {
+  repeated WaitingPlayer waiting = 1;  // in arrival order
+  repeated Lobby lobbies = 2;
+  map<string, string> lobby_of = 3;    // player ID -> lobby ID
+}
+
+message ReplicateRequest {
+  // Who sent it: the queue's primary, or (for a snapshot handed to a new
+  // owner) any node that held a copy.
+  string sender_node_id = 1;
+
+  // The membership epoch the sender is acting under. A receiver at any other
+  // epoch rejects the request, so a stale node that no longer owns the shard
+  // can't overwrite newer state.
   uint64 epoch = 2;
 
   QueueKey queue = 3;  // which shard this change belongs to
 
-  // Per-shard counter, +1 per change, so the backup applies changes in order
-  // and can ignore duplicates from retries.
+  // Per-shard counter, +1 per change. A backup applies a change only if it
+  // is exactly the next one; anything else is rejected and the primary
+  // sends a full snapshot instead. For a snapshot: the last change in it.
   uint64 sequence = 4;
 
   oneof op {
     EnqueueOp enqueue = 5;
     CancelOp cancel = 6;
     LobbyFormedOp lobby_formed = 7;
+    ShardSnapshot snapshot = 8;
   }
 }
 
 message ReplicateResponse {
   bool accepted = 1;
-  uint64 epoch = 2;  // the backup's epoch, so a stale primary learns it is stale
+  uint64 epoch = 2;    // the receiver's epoch, so a stale sender learns it is stale
+  string reason = 3;   // why it was rejected (for logs and tests)
 }
 
 // ---- GetTopology ----

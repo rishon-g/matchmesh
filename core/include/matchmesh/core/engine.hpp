@@ -16,13 +16,26 @@
 //                   never block each other; only creating a brand-new shard
 //                   takes the exclusive (write) lock, and that happens once
 //                   per queue.
-//   Shard::mutex    guards one shard's queue and lobbies.
+//   Shard::write_mutex
+//                   serialises *changes* to one shard (enqueue, cancel, a
+//                   lobby forming, replicated changes, role changes). It is
+//                   held while a change is copied to the backup, which is
+//                   what keeps a shard's changes in order.
+//   Shard::mutex    guards one shard's queue and lobbies. Held only briefly,
+//                   never across a network call, so lookups stay fast even
+//                   while a change is being replicated.
 //   WorkerSignal    one small mutex + condition variable per worker, used
 //                   only to wake that worker when its shards get a player.
 //
-// Lock ordering rule, which rules out deadlock: never hold two of these at
-// once. Each operation finds its shard (map lock released), then locks just
-// that shard.
+// Lock ordering rule, which rules out deadlock: the map lock is never held
+// with any other lock (find the shard, release it). The only nesting is a
+// shard's write_mutex, then that same shard's mutex, always in that order.
+//
+// Replication (see replication.hpp): with a Replicator, every change is
+// proposed, copied to the backup, and only then applied, so the backup is
+// never behind what a player was told. Each shard is either the *primary*
+// copy (matched by the workers, accepts client changes) or a *replica* kept
+// for another node, which only changes when the primary says so.
 //
 // Still no networking here, so the engine can be tested on its own,
 // including under ThreadSanitizer.
@@ -44,6 +57,7 @@
 #include <vector>
 
 #include "matchmesh/core/matcher.hpp"
+#include "matchmesh/core/replication.hpp"
 #include "matchmesh/core/skill_queue.hpp"
 #include "matchmesh/core/types.hpp"
 
@@ -70,6 +84,24 @@ struct PlayerLookup {
     std::optional<Lobby> lobby;  // set only when status == kInLobby
 };
 
+enum class CancelResult {
+    kCancelled,
+    kNotWaiting,      // the player wasn't waiting in that queue
+    kNotPrimary,      // this node keeps only a replica of the queue
+    kNotReplicated,   // the backup didn't confirm it, so nothing changed; safe to retry
+};
+
+enum class ShardRole {
+    kPrimary,  // this node owns the queue: it is matched here and takes client changes
+    kReplica,  // a copy kept for another node: changes only by replication
+};
+
+struct ShardInfo {
+    ShardRole role = ShardRole::kPrimary;
+    std::uint64_t sequence = 0;  // number of the last change applied
+    std::size_t queued = 0;      // players waiting
+};
+
 struct EnqueueOutcome {
     EnqueueResult result;
     QueueKey queue;          // the queue the player was placed in (or would have been)
@@ -82,10 +114,12 @@ public:
 
     // node_id prefixes lobby IDs so they are unique across the cluster.
     // `clock` lets tests control time; production uses the real clock. It may
-    // be called from several threads at once.
+    // be called from several threads at once. `replicator` (optional, must
+    // outlive the engine) receives every change before it is applied;
+    // without one the engine is a plain single-node engine.
     // Throws std::invalid_argument for a bad config.
     explicit MatchmakingEngine(std::string node_id, EngineConfig config = {},
-                               ClockFn clock = Clock::now);
+                               ClockFn clock = Clock::now, Replicator* replicator = nullptr);
 
     // Stops the workers and waits for them to finish.
     ~MatchmakingEngine();
@@ -94,11 +128,12 @@ public:
     MatchmakingEngine& operator=(const MatchmakingEngine&) = delete;
 
     // Puts a player in the queue for this region and game mode. The skill
-    // bracket comes from their rating.
+    // bracket comes from their rating. A queue this node has never seen
+    // starts here as a primary.
     EnqueueOutcome enqueue(Player player, std::string region, std::string game_mode);
 
-    // Removes a waiting player. False if they weren't waiting in that queue.
-    bool cancel(const QueueKey& queue, const std::string& player_id);
+    // Removes a waiting player.
+    CancelResult cancel(const QueueKey& queue, const std::string& player_id);
 
     // Where a player stands in one queue.
     [[nodiscard]] PlayerLookup lookup(const QueueKey& queue, const std::string& player_id) const;
@@ -113,16 +148,50 @@ public:
     [[nodiscard]] std::size_t queued_players() const;
     [[nodiscard]] std::size_t lobbies_formed() const noexcept;
 
+    // ---- Replication: replica side and moving shards between nodes ----
+
+    // Every queue this node holds (as primary or replica).
+    [[nodiscard]] std::vector<QueueKey> shards() const;
+    // Role, sequence and size of one queue, or nothing if it isn't held.
+    [[nodiscard]] std::optional<ShardInfo> shard_info(const QueueKey& queue) const;
+
+    // Applies a change sent by the queue's primary to this node's replica,
+    // creating the replica if it's new. Applied only if it is the next
+    // change in sequence and fits the replica's state; otherwise nothing
+    // changes and it returns false (the primary then sends a full copy).
+    bool apply_replicated(const ShardChange& change);
+
+    // Replaces a queue's entire state with `state`, in the given role.
+    void install(const ShardState& state, ShardRole role);
+    // A complete copy of a queue, or nothing if it isn't held.
+    [[nodiscard]] std::optional<ShardState> snapshot(const QueueKey& queue) const;
+
+    // Makes a held queue primary (the workers start matching it) or a
+    // replica (they stop, and client changes are refused). Waits for a
+    // change that is being replicated to finish first.
+    void set_role(const QueueKey& queue, ShardRole role);
+    // Forgets a queue entirely (it now lives on other nodes).
+    void drop(const QueueKey& queue);
+
+    // For a primary queue: has the replicator make sure the backup holds a
+    // complete copy. False if it couldn't, or the queue isn't primary here.
+    bool sync_backup(const QueueKey& queue);
+
 private:
     // One queue plus the lobbies it has formed, so GetLobby can answer
     // "which lobby is this player in?".
     struct Shard {
         Shard(QueueKey key, std::size_t key_hash) : queue(std::move(key)), hash(key_hash) {}
 
-        mutable std::mutex mutex;  // guards queue and lobby_of
+        std::mutex write_mutex;    // serialises changes; see the lock rules above
+        mutable std::mutex mutex;  // guards everything below
         SkillQueue queue;
         std::unordered_map<std::string, std::shared_ptr<const Lobby>> lobby_of;
-        const std::size_t hash;    // QueueKeyHash of the key, computed once
+        // Empty when the queue isn't held here (never seen, or dropped).
+        // Changed only with both locks held.
+        std::optional<ShardRole> role;
+        std::uint64_t sequence = 0;  // last change applied; both locks to change
+        const std::size_t hash;      // QueueKeyHash of the key, computed once
     };
 
     // Lets enqueue wake just the one worker that owns the shard it touched.
@@ -141,11 +210,23 @@ private:
     std::vector<Shard*> shards_for(std::size_t index, std::size_t stride) const;
 
     std::size_t match_shard(Shard& shard, TimePoint now);
+
+    // Step 2 of every change: copy it to the backup. Call with the shard's
+    // write lock held (and not its mutex). True without a replicator.
+    bool replicate(Shard& shard, const ShardChange& change);
+    // Step 3: apply a change. Checks it fits first and changes nothing if
+    // not. Call with both of the shard's locks held.
+    static bool apply_locked(Shard& shard, const ShardChange& change);
+    // A full copy of a shard. Call with the shard's mutex held.
+    static ShardState state_locked(const Shard& shard);
+    // Empties a shard. Call with both of the shard's locks held.
+    static void clear_locked(Shard& shard);
     void wake_owner_of(const Shard& shard);
     void worker_loop(std::stop_token stop, std::size_t index);
 
     const EngineConfig config_;
     const ClockFn clock_;
+    Replicator* const replicator_;  // may be null
     Matcher matcher_;  // safe for concurrent use on different queues
     std::atomic<std::size_t> lobbies_formed_{0};
 

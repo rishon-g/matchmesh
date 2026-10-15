@@ -3,6 +3,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <map>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -212,6 +213,55 @@ TEST(MembershipTest, TwoNodesConvergeThroughHeartbeats) {
 }
 
 // ---- Thread safety (meant for the tsan preset) ----
+
+// ---- Incarnations: catching restarts ----
+
+TEST(MembershipTest, TheCoordinatorWaitsToHearFromEveryoneBeforePublishing) {
+    Membership a("node-a", {"node-a", "node-b", "node-c"}, TimePoint{}, {}, 11);
+    // Just started: b and c count as alive (grace period) but are unheard.
+    a.record_contact("node-b", TimePoint{} + 100ms, 22);
+    EXPECT_FALSE(a.tick(TimePoint{} + 100ms).has_value());
+
+    a.record_contact("node-c", TimePoint{} + 200ms, 33);
+    const auto published = a.tick(TimePoint{} + 200ms);
+    ASSERT_TRUE(published.has_value());
+    EXPECT_EQ(published->epoch, 1u);
+    EXPECT_EQ(published->incarnations,
+              (std::map<std::string, std::uint64_t>{{"node-a", 11}, {"node-b", 22}, {"node-c", 33}}));
+    EXPECT_TRUE(published->lists("node-b", 22));
+    EXPECT_FALSE(published->lists("node-b", 23));
+}
+
+TEST(MembershipTest, ANodeThatRestartsBeforeAnyoneNoticesGetsANewEpoch) {
+    Membership a("node-a", {"node-a", "node-b"}, TimePoint{}, {}, 11);
+    a.record_contact("node-b", TimePoint{} + 100ms, 22);
+    ASSERT_EQ(a.tick(TimePoint{} + 100ms)->epoch, 1u);
+
+    // b crashes and is back 200 ms later: never silent long enough to be
+    // suspected, but it's a new process with empty memory.
+    a.record_contact("node-b", TimePoint{} + 300ms, 23);
+    const auto published = a.tick(TimePoint{} + 300ms);
+    ASSERT_TRUE(published.has_value());
+    EXPECT_EQ(published->epoch, 2u);
+    EXPECT_EQ(published->members, (Names{"node-a", "node-b"}));
+    EXPECT_TRUE(published->lists("node-b", 23));
+}
+
+TEST(MembershipTest, ARestartedCoordinatorRepublishesItself) {
+    // The cluster's view lists node-a's previous incarnation (11).
+    const MembershipView cluster_view{4, {"node-a", "node-b"}, {{"node-a", 11}, {"node-b", 22}}};
+    Membership a("node-a", {"node-a", "node-b"}, TimePoint{}, {}, 12);  // restarted
+    ASSERT_TRUE(a.observe(cluster_view));
+    EXPECT_FALSE(a.view().lists("node-a", 12));  // not really a member yet
+
+    a.record_contact("node-b", TimePoint{} + 50ms, 22);
+    const auto published = a.tick(TimePoint{} + 50ms);
+    ASSERT_TRUE(published.has_value());
+    EXPECT_EQ(published->epoch, 5u);
+    EXPECT_TRUE(published->lists("node-a", 12));
+}
+
+// ---- Concurrency ----
 
 TEST(MembershipTest, SafeToUseFromManyThreadsAtOnce) {
     Membership a("node-a", kNodes, Clock::now());

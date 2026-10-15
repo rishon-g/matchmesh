@@ -17,6 +17,14 @@
 //     Routing follows the view, never a node's private suspicions, so all
 //     nodes route the same way once they've seen the same epoch.
 //
+// Incarnations: every process picks a random incarnation number when it
+// starts, and heartbeats carry it. Views record each member's incarnation.
+// A node that crashes and restarts comes back with a new number (and an
+// empty memory), so the coordinator publishes a new view for it even if it
+// was back before anyone noticed it was gone. That new epoch is what makes
+// the other nodes hand its queues back. (Same idea as SWIM's incarnation
+// numbers.) Incarnation 0 means "not using incarnations", as in tests.
+//
 // Pure logic with no networking or clock of its own: callers pass the current
 // time in, which keeps it fully testable. Thread-safe (one internal mutex):
 // heartbeat threads, gRPC handlers and a ticker all call into it.
@@ -37,6 +45,13 @@ namespace matchmesh::core {
 struct MembershipView {
     std::uint64_t epoch = 0;
     std::vector<std::string> members;  // sorted by ID
+    // Each member's incarnation when the view was published. Zeros are left
+    // out, so a view with no incarnations simply has an empty map.
+    std::map<std::string, std::uint64_t> incarnations{};
+
+    [[nodiscard]] std::uint64_t incarnation_of(const std::string& node) const;
+    // Whether this exact process (node + incarnation) is a member.
+    [[nodiscard]] bool lists(const std::string& node, std::uint64_t incarnation) const;
 
     // The node that published this view: always its lowest member, because a
     // coordinator includes itself and is the lowest alive node.
@@ -60,21 +75,24 @@ public:
     // `all_nodes` is every node that may ever be a member, including `self`
     // (the static peer list). Everyone starts out alive and in the epoch-0
     // view; silence over the next `suspect_after` is what removes a node.
+    // `incarnation` identifies this process (see above).
     // Throws std::invalid_argument if `self` is empty or not in `all_nodes`.
     Membership(std::string self, std::vector<std::string> all_nodes, TimePoint now,
-               MembershipConfig config = {});
+               MembershipConfig config = {}, std::uint64_t incarnation = 0);
 
-    // We heard from `node` (a heartbeat in either direction). Unknown nodes
-    // and ourselves are ignored.
-    void record_contact(const std::string& node, TimePoint now);
+    // We heard from `node` (a heartbeat in either direction), which is
+    // running as `incarnation`. Unknown nodes and ourselves are ignored.
+    void record_contact(const std::string& node, TimePoint now, std::uint64_t incarnation = 0);
 
     // Another node told us its view. Adopted if newer than ours. Returns true
     // if it was adopted.
     bool observe(const MembershipView& view);
 
     // Re-evaluates who is alive as of `now`. If we are the coordinator and the
-    // alive set differs from the current view, publishes a new view with the
-    // next epoch and returns it. Otherwise returns nothing.
+    // alive set (or one of their incarnations) differs from the current view,
+    // publishes a new view with the next epoch and returns it. Otherwise, or
+    // while we haven't yet heard from every node we count as alive (only
+    // possible just after starting), returns nothing.
     std::optional<MembershipView> tick(TimePoint now);
 
     [[nodiscard]] MembershipView view() const;
@@ -84,6 +102,7 @@ public:
     [[nodiscard]] std::string local_coordinator(TimePoint now) const;    // lowest alive
 
     [[nodiscard]] const std::string& self() const noexcept;
+    [[nodiscard]] std::uint64_t incarnation() const noexcept;
     [[nodiscard]] const MembershipConfig& config() const noexcept;
     [[nodiscard]] const std::vector<std::string>& all_nodes() const noexcept;  // sorted
 
@@ -94,9 +113,11 @@ private:
     const std::string self_;
     const std::vector<std::string> all_nodes_;
     const MembershipConfig config_;
+    const std::uint64_t incarnation_;
 
     mutable std::mutex mutex_;  // guards everything below
     std::map<std::string, TimePoint> last_contact_;
+    std::map<std::string, std::uint64_t> incarnation_of_;  // nodes we've heard from, and self
     MembershipView view_;
 };
 

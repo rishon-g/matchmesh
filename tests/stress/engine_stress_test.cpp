@@ -8,7 +8,9 @@
 #include <atomic>
 #include <chrono>
 #include <cstddef>
+#include <functional>
 #include <map>
+#include <mutex>
 #include <random>
 #include <set>
 #include <string>
@@ -18,6 +20,7 @@
 #include <gtest/gtest.h>
 
 #include "matchmesh/core/engine.hpp"
+#include "matchmesh/core/replication.hpp"
 
 namespace matchmesh::core {
 namespace {
@@ -140,7 +143,8 @@ TEST(EngineStressTest, ConcurrentEnqueueCancelAndLookupLoseNobody) {
                     // depends on whether a worker matched them first, which
                     // is exactly the race we want to exercise.
                     if (percent(rng) < 25) {
-                        record.cancelled = engine.cancel(record.queue, id);
+                        record.cancelled =
+                            engine.cancel(record.queue, id) == CancelResult::kCancelled;
                     }
                     mine.push_back(std::move(record));
                 }
@@ -296,6 +300,97 @@ TEST(EngineStressTest, ConcurrentMatchPassesNeverReuseALobbyId) {
     EXPECT_EQ(in_lobby, 4 * engine.lobbies_formed());
     EXPECT_EQ(lobby_ids.size(), engine.lobbies_formed()) << "two lobbies share an ID";
     EXPECT_EQ(formed_by_passes.load(), engine.lobbies_formed());
+}
+
+// Copies every change into a second engine, exactly as a backup node would,
+// from whichever thread made the change.
+class MirrorReplicator final : public Replicator {
+public:
+    explicit MirrorReplicator(MatchmakingEngine& backup) : backup_(backup) {}
+
+    bool replicate(const ShardChange& change,
+                   const std::function<ShardState()>& current) override {
+        if (!backup_.apply_replicated(change)) {
+            backup_.install(current(), ShardRole::kReplica);
+            if (!backup_.apply_replicated(change)) {
+                return false;
+            }
+        }
+        changes_.fetch_add(1, std::memory_order_relaxed);
+        return true;
+    }
+
+    bool sync(const QueueKey& /*queue*/, const std::function<ShardState()>& /*current*/) override {
+        return true;
+    }
+
+    [[nodiscard]] std::size_t changes() const { return changes_.load(); }
+
+private:
+    MatchmakingEngine& backup_;
+    std::atomic<std::size_t> changes_{0};
+};
+
+TEST(EngineStressTest, AReplicatedEngineUnderLoadLeavesAnIdenticalBackup) {
+    // Workers forming lobbies and clients enqueueing and cancelling all
+    // replicate at once, holding each shard's write lock across the copy.
+    // ThreadSanitizer checks the locking; the end state checks the order.
+    MatchmakingEngine backup("node-b", EngineConfig{.worker_count = 0});
+    MirrorReplicator mirror(backup);
+    std::vector<std::string> ids;
+    std::mutex ids_mutex;
+    {
+        MatchmakingEngine primary("node-a", EngineConfig{.worker_count = 4, .tick = 1ms},
+                                  Clock::now, &mirror);
+        {
+            std::vector<std::jthread> clients;
+            for (int c = 0; c < kClientThreads; ++c) {
+                clients.emplace_back([&, c] {
+                    std::mt19937 rng(static_cast<unsigned>(c) + 100);
+                    std::uniform_int_distribution<int> rating(kRatingLow, kRatingHigh);
+                    std::uniform_int_distribution<std::size_t> region(0, kRegions.size() - 1);
+                    std::uniform_int_distribution<int> percent(0, 99);
+                    for (int i = 0; i < 150; ++i) {
+                        const std::string id = "c" + std::to_string(c) + "-" + std::to_string(i);
+                        const auto outcome =
+                            primary.enqueue({id, rating(rng)}, kRegions[region(rng)], "ranked");
+                        ASSERT_EQ(outcome.result, EnqueueResult::kAdded);
+                        if (percent(rng) < 20) {
+                            (void)primary.cancel(outcome.queue, id);
+                        }
+                        const std::scoped_lock lock(ids_mutex);
+                        ids.push_back(id);
+                    }
+                });
+            }
+        }
+        // The workers keep forming lobbies as wait windows widen, and the
+        // backup is ahead by the change being copied right now, if any. So
+        // compare until a moment when no change is in flight on any queue.
+        const auto identical = [&] {
+            for (const QueueKey& queue : primary.shards()) {
+                const ShardState mine = *primary.snapshot(queue);
+                const auto theirs = backup.snapshot(queue);
+                if (!theirs || mine.sequence != theirs->sequence ||
+                    mine.waiting.size() != theirs->waiting.size() ||
+                    mine.lobby_of != theirs->lobby_of) {
+                    return false;
+                }
+            }
+            return true;
+        };
+        bool matched = false;
+        for (int attempt = 0; attempt < 300 && !matched; ++attempt) {
+            matched = identical();
+            if (!matched) {
+                std::this_thread::sleep_for(10ms);
+            }
+        }
+        EXPECT_TRUE(matched) << "the backup never caught up with the primary";
+        EXPECT_GT(primary.lobbies_formed(), 50u);
+    }
+    EXPECT_EQ(ids.size(), static_cast<std::size_t>(kClientThreads) * 150);
+    EXPECT_GT(mirror.changes(), ids.size());  // every join, plus cancels and lobbies
 }
 
 }  // namespace

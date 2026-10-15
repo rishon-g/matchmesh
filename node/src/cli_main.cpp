@@ -9,13 +9,16 @@
 // skill bracket (and so their queue), exactly as the server does on enqueue.
 //
 // Prints which node the call went to and which node actually served it, so
-// you can watch forwarding happen. Exits 0 on success, 1 on any error.
+// you can watch forwarding happen. Like any well-behaved client, it retries
+// UNAVAILABLE (a node is down and its backup is taking over, or the cluster
+// is still starting) for up to 10 s. Exits 0 on success, 1 on any error.
 
 #include <chrono>
 #include <cstdlib>
 #include <iostream>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <vector>
 
 #include <grpcpp/grpcpp.h>
@@ -48,6 +51,28 @@ void prepare(grpc::ClientContext& context) {
     context.set_deadline(std::chrono::system_clock::now() + std::chrono::seconds(5));
 }
 
+// Makes a call, retrying while the answer is UNAVAILABLE ("try again
+// shortly"). `call` gets a fresh context each attempt.
+template <typename Call>
+grpc::Status with_retries(Call call, int& retries) {
+    const auto give_up = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    while (true) {
+        grpc::ClientContext context;
+        prepare(context);
+        const grpc::Status status = call(context);
+        if (status.error_code() != grpc::StatusCode::UNAVAILABLE ||
+            std::chrono::steady_clock::now() >= give_up) {
+            return status;
+        }
+        ++retries;
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    }
+}
+
+std::string retried(int retries) {
+    return retries == 0 ? "" : ", after " + std::to_string(retries) + " retries";
+}
+
 int report_error(const grpc::Status& status) {
     std::cerr << "error: " << status.error_message() << " (code " << status.error_code() << ")\n";
     return EXIT_FAILURE;
@@ -59,11 +84,14 @@ int report_error(const grpc::Status& status) {
 int show_topology(const std::string& target) {
     const auto stub = matchmesh::v1::ClusterService::NewStub(
         grpc::CreateChannel(target, grpc::InsecureChannelCredentials()));
-    grpc::ClientContext context;
-    prepare(context);
     matchmesh::v1::GetTopologyResponse response;
-    if (const grpc::Status status =
-            stub->GetTopology(&context, matchmesh::v1::GetTopologyRequest{}, &response);
+    int retries = 0;
+    if (const grpc::Status status = with_retries(
+            [&](grpc::ClientContext& context) {
+                return stub->GetTopology(&context, matchmesh::v1::GetTopologyRequest{},
+                                         &response);
+            },
+            retries);
         !status.ok()) {
         return report_error(status);
     }
@@ -100,8 +128,18 @@ int main(int argc, char** argv) {
 
     const auto stub = MatchmakingService::NewStub(
         grpc::CreateChannel(target, grpc::InsecureChannelCredentials()));
-    grpc::ClientContext context;
-    prepare(context);
+    int retries = 0;
+    std::string server = "?";
+    // Calls `rpc` with retries, remembering which node served the last try.
+    const auto call = [&](auto rpc) {
+        return with_retries(
+            [&](grpc::ClientContext& context) {
+                const grpc::Status status = rpc(context);
+                server = served_by(context);
+                return status;
+            },
+            retries);
+    };
 
     // The queue this player belongs to, as the server would compute it.
     matchmesh::v1::QueueKey queue;
@@ -117,11 +155,14 @@ int main(int argc, char** argv) {
         request.set_region(region);
         request.set_game_mode(mode);
         matchmesh::v1::EnqueueResponse response;
-        if (const grpc::Status status = stub->Enqueue(&context, request, &response); !status.ok()) {
+        if (const grpc::Status status = call([&](grpc::ClientContext& context) {
+                return stub->Enqueue(&context, request, &response);
+            });
+            !status.ok()) {
             return report_error(status);
         }
         std::cout << "enqueued " << player << " into " << queue_name << "  (asked " << target
-                  << ", served by " << served_by(context) << ")\n";
+                  << ", served by " << server << retried(retries) << ")\n";
         return EXIT_SUCCESS;
     }
 
@@ -130,7 +171,10 @@ int main(int argc, char** argv) {
         request.set_player_id(player);
         *request.mutable_queue() = queue;
         matchmesh::v1::GetLobbyResponse response;
-        if (const grpc::Status status = stub->GetLobby(&context, request, &response); !status.ok()) {
+        if (const grpc::Status status = call([&](grpc::ClientContext& context) {
+                return stub->GetLobby(&context, request, &response);
+            });
+            !status.ok()) {
             return report_error(status);
         }
         std::cout << player << ": " << matchmesh::v1::PlayerStatus_Name(response.status());
@@ -141,7 +185,8 @@ int main(int argc, char** argv) {
             }
             std::cout << "]";
         }
-        std::cout << "  (asked " << target << ", served by " << served_by(context) << ")\n";
+        std::cout << "  (asked " << target << ", served by " << server << retried(retries)
+                  << ")\n";
         return EXIT_SUCCESS;
     }
 
@@ -150,11 +195,15 @@ int main(int argc, char** argv) {
         request.set_player_id(player);
         *request.mutable_queue() = queue;
         matchmesh::v1::CancelResponse response;
-        if (const grpc::Status status = stub->Cancel(&context, request, &response); !status.ok()) {
+        if (const grpc::Status status = call([&](grpc::ClientContext& context) {
+                return stub->Cancel(&context, request, &response);
+            });
+            !status.ok()) {
             return report_error(status);
         }
         std::cout << player << (response.cancelled() ? " cancelled" : " was not waiting")
-                  << "  (asked " << target << ", served by " << served_by(context) << ")\n";
+                  << "  (asked " << target << ", served by " << server << retried(retries)
+                  << ")\n";
         return EXIT_SUCCESS;
     }
 

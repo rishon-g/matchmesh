@@ -38,7 +38,10 @@ std::int32_t Matcher::window_for(Clock::duration waited) const noexcept {
 
 std::vector<Lobby> Matcher::match(SkillQueue& queue, TimePoint now) {
     std::vector<Lobby> lobbies;
-    while (auto lobby = form_one(queue, now)) {
+    while (auto lobby = propose(queue, now)) {
+        for (const Player& player : lobby->players) {
+            queue.remove(player.id);
+        }
         lobbies.push_back(std::move(*lobby));
     }
     return lobbies;
@@ -48,7 +51,7 @@ const MatchConfig& Matcher::config() const noexcept {
     return config_;
 }
 
-std::optional<Lobby> Matcher::form_one(SkillQueue& queue, TimePoint now) {
+std::optional<Lobby> Matcher::propose(const SkillQueue& queue, TimePoint now) {
     const std::size_t k = config_.lobby_size;
     const std::size_t n = queue.size();
     if (n < k) {
@@ -104,11 +107,6 @@ std::optional<Lobby> Matcher::form_one(SkillQueue& queue, TimePoint now) {
         lobby.players.reserve(k);
         for (std::size_t i = best_start; i < best_start + k; ++i) {
             lobby.players.push_back(sorted[i]->player);
-        }
-        // Copy the players out first: removing them from the queue destroys
-        // the entries that `sorted` points to.
-        for (const Player& player : lobby.players) {
-            queue.remove(player.id);
         }
         return lobby;
     }

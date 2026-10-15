@@ -19,6 +19,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -53,6 +54,14 @@ struct RouteDecision {
     std::uint64_t epoch = 0;
 };
 
+// Where a queue lives under one view: its primary (the owner) and its backup,
+// the next distinct node clockwise on the ring (none in a one-node cluster).
+struct Placement {
+    std::string primary;
+    std::optional<std::string> backup;
+    std::uint64_t epoch = 0;
+};
+
 class Router {
 public:
     // `peers` maps node ID -> host:port for every *other* node that may join
@@ -68,6 +77,8 @@ public:
     [[nodiscard]] RouteDecision route(const core::QueueKey& queue) const;
     [[nodiscard]] std::string owner_of(const core::QueueKey& queue) const;
     [[nodiscard]] bool is_local(const core::QueueKey& queue) const;
+    // Primary and backup together, from one consistent view.
+    [[nodiscard]] Placement placement(const core::QueueKey& queue) const;
 
     // Switches to `view` if it is newer than the current one. Members this
     // node has never heard of are skipped (they have no address). Returns
@@ -75,6 +86,7 @@ public:
     bool apply_view(const core::MembershipView& view);
 
     [[nodiscard]] std::uint64_t epoch() const;
+    [[nodiscard]] core::MembershipView view() const;  // the view routing follows
     [[nodiscard]] std::vector<std::string> members() const;  // current ring's nodes, sorted
 
     // Client stub for another node. Throws std::out_of_range for an unknown ID.

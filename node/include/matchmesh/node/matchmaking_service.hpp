@@ -33,6 +33,7 @@
 
 #include "matchmesh/core/engine.hpp"
 #include "matchmesh/node/router.hpp"
+#include "matchmesh/node/shard_manager.hpp"
 #include "matchmesh/v1/matchmaking.grpc.pb.h"
 
 namespace matchmesh::node {
@@ -43,8 +44,12 @@ inline constexpr std::string_view kEpochKey = "x-matchmesh-epoch";
 
 class MatchmakingServiceImpl final : public v1::MatchmakingService::Service {
 public:
-    // Both are owned by main and outlive the server.
-    MatchmakingServiceImpl(core::MatchmakingEngine& engine, const Router& router);
+    // All owned by main and outliving the server. With a ShardManager, a
+    // queue that is still moving to this node is refused (retryably) until
+    // its hand-over finishes; without one (single-node tests) every queue
+    // this node owns is served straight away.
+    MatchmakingServiceImpl(core::MatchmakingEngine& engine, const Router& router,
+                           ShardManager* shards = nullptr);
 
     grpc::Status Enqueue(grpc::ServerContext* context, const v1::EnqueueRequest* request,
                          v1::EnqueueResponse* response) override;
@@ -71,6 +76,7 @@ private:
 
     core::MatchmakingEngine& engine_;
     const Router& router_;
+    ShardManager* const shards_;
 };
 
 }  // namespace matchmesh::node
