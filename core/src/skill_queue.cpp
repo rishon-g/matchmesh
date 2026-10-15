@@ -36,6 +36,12 @@ std::optional<QueuedPlayer> SkillQueue::remove(const std::string& player_id) {
     return std::move(node.value());
 }
 
+void SkillQueue::clear() noexcept {
+    by_id_.clear();
+    by_rating_.clear();
+    next_arrival_ = 0;
+}
+
 bool SkillQueue::contains(const std::string& player_id) const {
     return by_id_.contains(player_id);
 }

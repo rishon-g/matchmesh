@@ -51,10 +51,16 @@ public:
     // counter, which is atomic. (The queue itself is not thread-safe.)
     std::vector<Lobby> match(SkillQueue& queue, TimePoint now);
 
+    // The next lobby the queue allows right now, without removing anyone.
+    // The engine uses this to copy a lobby to the backup *before* applying
+    // it; match() is propose() plus removing the players, repeated. Each
+    // call uses up a lobby ID, even if the caller then drops the proposal.
+    // Same thread-safety rules as match().
+    [[nodiscard]] std::optional<Lobby> propose(const SkillQueue& queue, TimePoint now);
+
     [[nodiscard]] const MatchConfig& config() const noexcept;
 
 private:
-    std::optional<Lobby> form_one(SkillQueue& queue, TimePoint now);
     std::string next_lobby_id();
 
     std::string lobby_id_prefix_;

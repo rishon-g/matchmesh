@@ -3,7 +3,7 @@
 A fault-tolerant distributed matchmaking cluster: five C++20 nodes, gRPC,
 consistent hashing, primary-backup replication and chaos testing.
 
-> Work in progress — currently at Phase 5 (failure detection and membership).
+> Work in progress — currently at Phase 5 (failure detection and replication).
 
 ## Quick start (development container)
 
@@ -69,8 +69,9 @@ ThreadSanitizer with `ctest --preset tsan -L stress`.
 Each node is a gRPC server that wraps the engine:
 
 - `MatchmakingService`: `Enqueue`, `Cancel` and `GetLobby` for clients.
-- `ClusterService`: `Heartbeat` (nodes exchanging membership) and `GetTopology`
-  (the cluster as this node sees it).
+- `ClusterService`: `Heartbeat` (nodes exchanging membership), `Replicate`
+  (primary to backup, and handing queues to new owners) and `GetTopology` (the
+  cluster as this node sees it).
 
 **Any node accepts any request.** The `Router` builds the same hash ring on every
 node from the peer list, so each node knows who owns every queue. A request for
@@ -80,7 +81,7 @@ misconfigured nodes fail fast instead of looping). The response carries
 `x-matchmesh-served-by`, naming the node that actually handled it. Forwarded
 requests also carry `x-matchmesh-epoch` (see below). If the owner is unreachable
 the caller gets `UNAVAILABLE`, which is safe to retry: within about 1.5 s the
-owner is dropped from the membership and its queues move to another node.
+owner is dropped from the membership and its backup takes over its queues.
 
 Settings come from flags or environment variables:
 
@@ -92,8 +93,9 @@ Settings come from flags or environment variables:
 | `--workers` | `MATCHMESH_WORKERS` | `4` |
 
 The node shuts down cleanly on Ctrl+C or `docker stop`. `matchmesh_cli` is a small
-client for trying it by hand (`enqueue`, `get-lobby`, `cancel`, `topology`). End-to-end tests in
-[`tests/node/`](tests/node) run three real nodes in-process.
+client for trying it by hand (`enqueue`, `get-lobby`, `cancel`, `topology`). Like a
+real client it retries `UNAVAILABLE` for up to 10 s and says how many retries it
+took. End-to-end tests in [`tests/node/`](tests/node) run three real nodes in-process.
 
 ## Membership and failure detection
 
@@ -118,6 +120,14 @@ opinion, so routing never follows them directly. Instead:
   `node-b` becomes the lowest alive node and publishes the next epoch itself.
   A node that comes back is seen again, and the coordinator publishes it back
   in (taking the coordinator role back if it has the lowest ID).
+- **Incarnations catch fast restarts.** Each process picks a random
+  *incarnation* number at startup and sends it in every heartbeat; views record
+  each member's incarnation. A node that crashes and is back before anyone
+  noticed (under 1.5 s) still has a new incarnation and an empty memory, so the
+  coordinator publishes a new epoch for it, which is what gets its queues handed
+  back. A process never counts as a member of a view that lists a different
+  incarnation of it. (Because epoch 0 lists no incarnations, a freshly started
+  cluster settles at epoch 1 once everyone has heard from everyone.)
 
 During a change, two nodes can briefly disagree. A forwarded request carries the
 sender's epoch in `x-matchmesh-epoch`; if it differs from the receiver's, the
@@ -129,24 +139,76 @@ Peer connections retry quickly (gRPC reconnect backoff 100 ms, capped at 1 s,
 instead of the default 1 s growing to 2 min), so a node that was down for a while
 is reachable again within about a second of restarting.
 
-Measured on a real five-process cluster with the default timings: killing a
-node with `kill -9` got it dropped from every node's view in about **1.5 s**
-(1,456 ms; 1,480 ms when the killed node was the coordinator), within the 2 s
-target. [`tests/node/cluster_test.cpp`](tests/node/cluster_test.cpp) checks
-crashes, coordinator failover, restarts and the 2 s target with real nodes.
+## Replication and failover
 
-**Not yet:** players queued on a node that dies are lost, because the new owner
-starts with empty queues; primary-backup replication fixes that in the next step.
+Each queue lives on two nodes: its **primary** (the owner on the ring) and its
+**backup**, the next distinct node clockwise. Replication is **synchronous**: the
+primary copies every change to the backup and waits for it to be applied before
+the change happens on the primary or the player gets an answer.
+
+- **One path for every change.** An enqueue, a cancel and a lobby forming all go
+  *propose → copy to the backup → apply*, under that queue's write lock. If the
+  copy fails, nothing changes and the player gets a retryable `UNAVAILABLE`, so a
+  player is never told "done" for something only one node knows about. The
+  shard's own data lock is not held during the copy, so lookups stay fast.
+- **Lobbies are one change.** A lobby is proposed, copied with its unique ID and
+  all four players, and only then applied: the players leave the queue and join
+  the lobby in a single step on both nodes. A failover can't leave half a lobby
+  formed, re-match its players, or put anyone in two lobbies.
+- **Strict order.** Every change to a queue has a sequence number. A backup
+  applies a change only if it is exactly the next one; anything else (a gap, a
+  repeat, a change that doesn't fit) is rejected, and the primary then sends a
+  full **snapshot** of the queue before carrying on. The same snapshot brings a
+  brand-new backup up to date, and every epoch change re-sends it, so a backup
+  that restarted can't be silently empty.
+- **Stale nodes can't write.** `Replicate` carries the sender's epoch and is only
+  accepted at the receiver's exact epoch, and only from the node the receiver
+  believes is that queue's primary. A node that has fallen behind (or was cut
+  off) can't overwrite newer state.
+
+**Moving queues when the view changes.** Every node walks the queues it holds:
+one it no longer owns is frozen (demoted to a replica), sent to its new owner, and
+dropped unless this node is now its backup; one it still owns gets its (possibly
+new) backup brought up to date. A node reports through heartbeats when it has
+finished, and a queue's **new owner starts serving only once every member has
+reported finishing for the current epoch** (until then it answers `UNAVAILABLE`,
+retry). That covers both directions:
+
+- *Failover:* the primary dies, the next epoch makes its backup the owner, and
+  the backup's copy goes live with every waiting player and every lobby intact.
+- *Rejoin:* a node comes back empty, the next epoch gives it its queues back, and
+  whoever held them hands them over before it serves.
+
+Measured on a real five-process cluster with the default timings (500 ms
+heartbeats, 1.5 s suspicion): `kill -9` of the node owning a queue had that queue
+answering again from its backup after **1.3 to 1.5 s** (1,311 ms; 1,499 ms when the
+killed node was the coordinator), within the 2 s target. In every run, all 60 players (40 in
+lobbies, 20 queued) had exactly the same status and lobby after the crash and
+again after the killed node restarted and took its queues back.
+[`tests/node/cluster_test.cpp`](tests/node/cluster_test.cpp) checks crashes,
+coordinator failover, fast and slow restarts, a backup and then a primary dying,
+lobbies surviving failover, stale-epoch rejection and the 2 s target with real
+nodes; [`tests/core/replication_test.cpp`](tests/core/replication_test.cpp)
+mirrors hundreds of random changes into a second engine and checks both end up
+identical.
+
+What this does **not** survive: a queue's primary *and* backup dying within the
+same ~1.5 s detection window (only two copies exist). While a dead node hasn't
+been noticed yet, changes to the queues it held (as primary or backup) fail
+retryably, and new owners wait for it to be dropped before serving.
 
 ### Limitation: split brain
 
 This is a simple failure detector, not a consensus protocol. If the network
 splits the cluster in two (say `a, b` | `c, d, e`), each side suspects the other,
 `node-a` coordinates one side and `node-c` the other, and both keep serving the
-queues they now believe they own. Both sides run happily until the split heals,
-at which point the higher epoch wins and anything formed on the losing side
-for the same queue conflicts. One-way or flaky links can also make the view
-flap. Nodes can't tell "that node crashed" from "I can't reach that node".
+queues they now believe they own, each replicating to a backup on its own side.
+Epoch checks don't help here, because each side's epochs are internally
+consistent. Both sides run happily until the split heals, at which point the
+higher epoch wins, its queues are handed over, and whatever the losing side did
+to the same queues (players queued, lobbies formed) is overwritten. One-way or
+flaky links can also make the view flap. Nodes can't tell "that node crashed"
+from "I can't reach that node".
 
 A consensus protocol such as **Raft** fixes this by requiring a **majority**
 (3 of 5) for every membership change: a leader is elected by a majority, and
@@ -165,15 +227,22 @@ docker compose exec node-a matchmesh_cli --target node-c:50051 enqueue alice 130
 docker compose down
 ```
 
-To watch failover, stop a node and ask another for its view:
+To watch failover, put a player in a queue, kill the node holding it, and ask
+another node about them:
 
 ```bash
-docker compose stop node-c
-docker compose exec node-a matchmesh_cli --target node-a:50051 topology   # epoch 1, node-c DOWN
-docker compose start node-c
-docker compose exec node-a matchmesh_cli --target node-a:50051 topology   # epoch 2, all members
-docker compose logs node-b                                                # each epoch as it arrived
+docker compose exec node-a matchmesh_cli --target node-a:50051 get-lobby us-4 1204 us-west ranked
+#   us-4: PLAYER_STATUS_IN_LOBBY node-d-1 [...]  (asked node-a:50051, served by node-d)
+docker compose kill node-d                     # SIGKILL: no clean shutdown
+docker compose exec node-a matchmesh_cli --target node-a:50051 get-lobby us-4 1204 us-west ranked
+#   same lobby, now served by node-d's backup (after a few retries while it takes over)
+docker compose exec node-a matchmesh_cli --target node-a:50051 topology   # node-d DOWN
+docker compose start node-d                    # comes back empty and gets its queues back
+docker compose logs node-b                     # each epoch and hand-over as it happened
 ```
+
+(`us-4` is from `cluster_demo.sh`; which node owns its queue depends on the ring,
+so kill whichever node the first command says served it.)
 
 ## Service contracts
 
@@ -185,7 +254,7 @@ and compiled into the `matchmesh_proto` library.
 |---|---|
 | `common.proto` | Shared types: `Player`, `QueueKey` (the shard key: region, game mode, skill bracket), `Lobby` |
 | `matchmaking.proto` | `MatchmakingService`: `Enqueue`, `Cancel`, `GetLobby` (clients → any node) |
-| `cluster.proto` | `ClusterService`: `Heartbeat`, `Replicate`, `GetTopology` (node ↔ node, gateway) |
+| `cluster.proto` | `ClusterService`: `Heartbeat` (membership, incarnations, hand-over progress), `Replicate` (changes and snapshots), `GetTopology` (node ↔ node, gateway) |
 
 ## Smoke test
 

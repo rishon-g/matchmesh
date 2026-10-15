@@ -14,6 +14,11 @@
 //     heartbeat thread sends straight away, so a new view reaches the whole
 //     cluster in milliseconds instead of waiting for the next beat.
 //
+//   * With a ShardManager, heartbeats also carry how far this node has got
+//     handing queues over after a view change, and pass on what peers
+//     report, so a queue's new owner knows when it may start serving. When
+//     that progress changes, heartbeats go out at once, like a view change.
+//
 // Timing with the defaults: a dead node is suspected after 1.5 s of silence,
 // the coordinator notices within the next 100 ms check, and the new view
 // spreads immediately, which keeps recovery under 2 seconds.
@@ -32,6 +37,7 @@
 
 #include "matchmesh/core/membership.hpp"
 #include "matchmesh/node/router.hpp"
+#include "matchmesh/node/shard_manager.hpp"
 #include "matchmesh/v1/cluster.grpc.pb.h"
 
 namespace matchmesh::node {
@@ -46,9 +52,10 @@ struct ClusterManagerConfig {
 class ClusterManager {
 public:
     // `self_address` is only used to report this node in GetTopology. The
-    // membership and router are owned by the caller and must outlive this.
+    // membership, router and shard manager (optional) are owned by the
+    // caller and must outlive this.
     ClusterManager(core::Membership& membership, Router& router, std::string self_address,
-                   ClusterManagerConfig config = {});
+                   ClusterManagerConfig config = {}, ShardManager* shards = nullptr);
 
     // Stops the threads (same as stop()).
     ~ClusterManager();
@@ -77,12 +84,21 @@ private:
     // Called whenever this node's view may have changed: switch the router,
     // log it and wake the heartbeat threads to spread it.
     void adopt(const core::MembershipView& view, std::string_view reason);
+    // Wakes the heartbeat threads so they send now.
+    void nudge();
+    // What a peer told us about itself in a heartbeat (either direction).
+    template <typename Message>
+    void heard_from(const std::string& peer, const Message& message);
+    // Fills in a heartbeat's description of this node.
+    template <typename Message>
+    void describe_self(Message* message) const;
     void log(const std::string& message) const;
 
     core::Membership& membership_;
     Router& router_;
     const std::string self_address_;
     const ClusterManagerConfig config_;
+    ShardManager* const shards_;  // may be null
     std::unordered_map<std::string, std::unique_ptr<v1::ClusterService::Stub>> stubs_;
 
     // Wakes the heartbeat threads early when the view changes.

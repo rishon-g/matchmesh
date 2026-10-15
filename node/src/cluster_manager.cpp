@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <iostream>
+#include <optional>
 #include <sstream>
 #include <utility>
 
@@ -18,9 +19,17 @@ std::string join(const std::vector<std::string>& names) {
     return out;
 }
 
-core::MembershipView view_from(std::uint64_t epoch,
-                               const google::protobuf::RepeatedPtrField<std::string>& members) {
-    return core::MembershipView{epoch, {members.begin(), members.end()}};
+template <typename Message>
+core::MembershipView view_from(const Message& message) {
+    core::MembershipView view{message.epoch(),
+                              {message.members().begin(), message.members().end()},
+                              {}};
+    for (const auto& [node, incarnation] : message.incarnations()) {
+        if (incarnation != 0) {
+            view.incarnations.emplace(node, incarnation);
+        }
+    }
+    return view;
 }
 
 template <typename Message>
@@ -29,18 +38,27 @@ void put_view(const core::MembershipView& view, Message* message) {
     for (const std::string& member : view.members) {
         message->add_members(member);
     }
+    for (const auto& [node, incarnation] : view.incarnations) {
+        (*message->mutable_incarnations())[node] = incarnation;
+    }
 }
 
 }  // namespace
 
 ClusterManager::ClusterManager(core::Membership& membership, Router& router,
-                               std::string self_address, ClusterManagerConfig config)
+                               std::string self_address, ClusterManagerConfig config,
+                               ShardManager* shards)
     : membership_(membership),
       router_(router),
       self_address_(std::move(self_address)),
-      config_(config) {
+      config_(config),
+      shards_(shards) {
     for (const auto& [id, address] : router_.peers()) {
         stubs_.emplace(id, v1::ClusterService::NewStub(make_peer_channel(address)));
+    }
+    if (shards_ != nullptr) {
+        // Tell everyone as soon as our hand-over progress changes.
+        shards_->set_on_synced([this] { nudge(); });
     }
 }
 
@@ -76,19 +94,14 @@ void ClusterManager::heartbeat_loop(std::stop_token stop, const std::string& pee
         }
 
         v1::HeartbeatRequest request;
-        request.set_node_id(membership_.self());
-        put_view(membership_.view(), &request);
+        describe_self(&request);
 
         grpc::ClientContext context;
         // Fail fast if the peer is down; don't wait for it to come up.
         context.set_deadline(std::chrono::system_clock::now() + config_.heartbeat_timeout);
         v1::HeartbeatResponse response;
         if (stub.Heartbeat(&context, request, &response).ok()) {
-            membership_.record_contact(peer, core::Clock::now());
-            const auto theirs = view_from(response.epoch(), response.members());
-            if (membership_.observe(theirs)) {
-                adopt(theirs, "learned from " + peer);
-            }
+            heard_from(peer, response);
         }
 
         // Sleep until the next beat, or until our view changes (so we pass
@@ -135,6 +148,13 @@ void ClusterManager::adopt(const core::MembershipView& view, std::string_view re
     }
     log("epoch " + std::to_string(view.epoch) + ": members [" + join(view.members) +
         "], coordinator " + view.coordinator() + " (" + std::string(reason) + ")");
+    if (shards_ != nullptr) {
+        shards_->on_view_changed();
+    }
+    nudge();
+}
+
+void ClusterManager::nudge() {
     {
         const std::scoped_lock lock(wake_mutex_);
         ++view_generation_;
@@ -142,15 +162,36 @@ void ClusterManager::adopt(const core::MembershipView& view, std::string_view re
     wake_.notify_all();
 }
 
+template <typename Message>
+void ClusterManager::heard_from(const std::string& peer, const Message& message) {
+    membership_.record_contact(peer, core::Clock::now(), message.incarnation());
+    if (shards_ != nullptr) {
+        shards_->record_progress(peer, message.has_synced_epoch()
+                                           ? std::optional<std::uint64_t>(message.synced_epoch())
+                                           : std::nullopt);
+    }
+    const core::MembershipView theirs = view_from(message);
+    if (membership_.observe(theirs)) {
+        adopt(theirs, "learned from " + peer);
+    }
+}
+
+template <typename Message>
+void ClusterManager::describe_self(Message* message) const {
+    message->set_node_id(membership_.self());
+    message->set_incarnation(membership_.incarnation());
+    put_view(membership_.view(), message);
+    if (shards_ != nullptr) {
+        if (const auto synced = shards_->synced_epoch()) {
+            message->set_synced_epoch(*synced);
+        }
+    }
+}
+
 void ClusterManager::on_heartbeat(const v1::HeartbeatRequest& request,
                                   v1::HeartbeatResponse* response) {
-    membership_.record_contact(request.node_id(), core::Clock::now());
-    const auto theirs = view_from(request.epoch(), request.members());
-    if (membership_.observe(theirs)) {
-        adopt(theirs, "learned from " + request.node_id());
-    }
-    response->set_node_id(membership_.self());
-    put_view(membership_.view(), response);
+    heard_from(request.node_id(), request);
+    describe_self(response);
 }
 
 void ClusterManager::fill_topology(v1::GetTopologyResponse* response) const {

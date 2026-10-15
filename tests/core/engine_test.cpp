@@ -130,20 +130,21 @@ TEST_F(EngineTest, CancelRemovesAWaitingPlayer) {
     ASSERT_EQ(engine_.enqueue({"alice", 1300}, "us-west", "ranked").result,
               EnqueueResult::kAdded);
 
-    EXPECT_TRUE(engine_.cancel(ranked2_, "alice"));
+    EXPECT_EQ(engine_.cancel(ranked2_, "alice"), CancelResult::kCancelled);
     EXPECT_EQ(engine_.lookup(ranked2_, "alice").status, PlayerStatus::kNotFound);
-    EXPECT_FALSE(engine_.cancel(ranked2_, "alice"));
+    EXPECT_EQ(engine_.cancel(ranked2_, "alice"), CancelResult::kNotWaiting);
 }
 
 TEST_F(EngineTest, CancelInAnUnknownQueueDoesNothing) {
-    EXPECT_FALSE(engine_.cancel(make_queue_key("eu", "ranked", 1300), "alice"));
+    EXPECT_EQ(engine_.cancel(make_queue_key("eu", "ranked", 1300), "alice"),
+              CancelResult::kNotWaiting);
 }
 
 TEST_F(EngineTest, CannotCancelAfterBeingMatched) {
     enqueue_four(1200);
     ASSERT_EQ(engine_.run_match_pass(now_), 1u);
 
-    EXPECT_FALSE(engine_.cancel(ranked2_, "p1200"));
+    EXPECT_EQ(engine_.cancel(ranked2_, "p1200"), CancelResult::kNotWaiting);
     EXPECT_EQ(engine_.lookup(ranked2_, "p1200").status, PlayerStatus::kInLobby);
 }
 

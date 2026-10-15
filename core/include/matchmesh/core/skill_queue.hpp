@@ -31,6 +31,9 @@ enum class EnqueueResult {
     kDuplicate,      // a player with this ID is already in the queue
     kWrongBracket,   // the rating belongs to a different skill bracket
     kInvalidPlayer,  // the player ID is empty
+    // Only from MatchmakingEngine, which adds replication on top:
+    kNotPrimary,     // this node keeps only a replica of the queue
+    kNotReplicated,  // the backup didn't confirm it, so nothing changed; safe to retry
 };
 
 class SkillQueue {
@@ -57,6 +60,9 @@ public:
     // Takes a player out of the queue (a cancel, or because they were placed
     // in a lobby). Returns the removed entry, or nothing if they weren't here.
     std::optional<QueuedPlayer> remove(const std::string& player_id);
+
+    // Empties the queue (used when a whole replicated copy replaces it).
+    void clear() noexcept;
 
     [[nodiscard]] bool contains(const std::string& player_id) const;
     [[nodiscard]] std::size_t size() const noexcept;
