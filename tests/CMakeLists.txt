@@ -22,6 +22,14 @@ target_link_libraries(matchmesh_core_tests
 # names the exact test that broke.
 gtest_discover_tests(matchmesh_core_tests)
 
+# ---- Load generator: histogram and workload (no networking) ----
+add_executable(matchmesh_loadgen_tests
+    loadgen/histogram_test.cpp
+    loadgen/workload_test.cpp)
+target_link_libraries(matchmesh_loadgen_tests
+    PRIVATE matchmesh_loadgen_lib GTest::gtest_main matchmesh_warnings)
+gtest_discover_tests(matchmesh_loadgen_tests)
+
 # ---- Node service tests (real gRPC server, in-process) ----
 # Skipped in the tsan build: the gRPC packages from apt aren't compiled with
 # ThreadSanitizer, so TSan reports false races inside gRPC itself. TSan runs
@@ -32,9 +40,11 @@ if(NOT CMAKE_CXX_FLAGS MATCHES "-fsanitize=thread")
         node/router_test.cpp
         node/forwarding_test.cpp
         node/cluster_test.cpp
-        node/shard_manager_test.cpp)
+        node/shard_manager_test.cpp
+        node/loadgen_runner_test.cpp)
     target_link_libraries(matchmesh_node_tests
-        PRIVATE matchmesh_node_lib GTest::gtest_main matchmesh_warnings)
+        PRIVATE matchmesh_node_lib matchmesh_loadgen_runner GTest::gtest_main
+                matchmesh_warnings)
     gtest_discover_tests(matchmesh_node_tests)
 endif()
 

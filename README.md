@@ -3,7 +3,7 @@
 A fault-tolerant distributed matchmaking cluster: five C++20 nodes, gRPC,
 consistent hashing, primary-backup replication and chaos testing.
 
-> Work in progress — currently at Phase 5 (failure detection and replication).
+> Work in progress — currently at Phase 6 (load generation and chaos testing).
 
 ## Quick start (development container)
 
@@ -243,6 +243,75 @@ docker compose logs node-b                     # each epoch and hand-over as it 
 
 (`us-4` is from `cluster_demo.sh`; which node owns its queue depends on the ring,
 so kill whichever node the first command says served it.)
+
+## Load testing
+
+`matchmesh_loadgen` ([`loadgen/`](loadgen)) simulates players joining the
+cluster and reports how fast it answered and how long matchmaking took.
+
+```bash
+docker compose up -d --build
+docker compose run --rm loadgen                       # 10,000 players at 1,000/s
+docker compose run --rm loadgen --rate 3000 --json /tmp/out.json
+# or, outside Docker:
+matchmesh_loadgen --targets localhost:50051,localhost:50052 --players 10000 --rate 1000
+```
+
+**The workload looks like real traffic.** Players arrive as a Poisson process
+(random gaps around the target rate, so there are bursts and lulls), ratings
+follow a bell curve (mean 1500, standard deviation 300), and regions and modes
+are weighted (us-west 30% ... asia 15%; ranked 60%, casual 40%). The same
+`--seed` always produces the same players.
+
+**Open-loop measurement.** Each player is sent at their scheduled time whether
+or not earlier calls have returned, and latency is measured from that scheduled
+time. A tester that waits for each reply before sending the next quietly slows
+down whenever the server does, hiding exactly the stalls you want to see
+(*coordinated omission*). Players go to the nodes round-robin, and like a real
+client the generator retries `UNAVAILABLE` on the next node.
+
+Two latencies, each kept in a log-linear histogram (HdrHistogram's layout: under
+1.6% error at any scale, fixed memory, one per thread merged at the end):
+
+- **Enqueue latency**: scheduled arrival to reply, including forwarding to the
+  queue's owner and the synchronous copy to its backup.
+- **Time to lobby**: the server's `enqueued_at` to the lobby's `formed_at`. This
+  measures matchmaking itself (how long until three similar players show up),
+  not server speed.
+
+Afterwards it asks where every player ended up: in a lobby, still queued, or
+unknown to the cluster (which would mean a lost player).
+
+### Results
+
+Five nodes as separate processes on one machine, release build, 2 worker
+threads each, sharing **2 CPU cores** with the load generator. A laptop with
+more cores will do better; the shape is what matters.
+
+| Offered load | Achieved | Enqueue p50 | p90 | p99 | p99.9 |
+|---|---|---|---|---|---|
+| 10,000 players at 1,000/s | 989/s | 0.78 ms | 1.28 ms | 3.07 ms | 8.45 ms |
+| 10,000 players at 3,000/s | 2,963/s | 1.82 ms | 6.97 ms | 22.0 ms | 37.9 ms |
+| 10,000 players at 6,000/s | 3,980/s | 483 ms | 762 ms | 868 ms | 1.02 s |
+
+- Up to about 3,000 players/s every enqueue (three gRPC hops: the node asked,
+  the queue's owner, its backup) is answered in milliseconds. Throughput tops
+  out around **4,000 players/s** on 2 cores, the same with 8 or 128 client
+  threads, so the limit is CPU, not the client. Past that, open-loop
+  measurement shows the honest result: a backlog builds and latency climbs to
+  seconds, instead of the tester quietly slowing down.
+- Time to lobby at 1,000/s: **p50 108 ms, p90 623 ms, p99 5.2 s**. A quarter of
+  players match in under a millisecond (they were the fourth to arrive and
+  completed a lobby); most wait for three similar players. The long tail is
+  players with rare ratings in thin queues, who wait for the match window to
+  widen. That's the matchmaker trading quality for wait time, as designed.
+- Every player accounted for: 9,916 in 2,479 lobbies, 84 still waiting in
+  queues with fewer than four compatible players, **0 lost**.
+- Load per node was uneven (1,387 to 3,146 players). Players are sharded by
+  *queue*, and a bell curve of ratings makes a few queues (mid ratings in
+  popular regions) much bigger than the rest. Every queue's players must live
+  together, so a hot queue can't be split across nodes. A real system would
+  split brackets more finely where players are dense.
 
 ## Service contracts
 

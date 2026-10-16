@@ -41,7 +41,7 @@ WORKDIR /src
 # .dockerignore keeps build/ and .git out, so this is just the source.
 COPY . .
 RUN cmake --preset release -DMATCHMESH_BUILD_TESTS=OFF \
-    && cmake --build --preset release --target matchmesh_node matchmesh_cli
+    && cmake --build --preset release --target matchmesh_node matchmesh_cli matchmesh_loadgen
 
 # ---- runtime ---------------------------------------------------------------
 FROM ubuntu:24.04 AS runtime
@@ -56,6 +56,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY --from=build /src/build/release/node/matchmesh_node /usr/local/bin/
 COPY --from=build /src/build/release/node/matchmesh_cli /usr/local/bin/
+COPY --from=build /src/build/release/loadgen/matchmesh_loadgen /usr/local/bin/
 
 EXPOSE 50051
 # Settings come from MATCHMESH_* environment variables (see docker-compose.yml).
