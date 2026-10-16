@@ -3,6 +3,7 @@
 #   docker compose up -d --build        start it (first build takes a few minutes)
 #   ./scripts/cluster_demo.sh           watch requests get forwarded
 #   docker compose logs -f node-a       follow one node's log
+#   docker compose run --rm loadgen     10,000 simulated players (see README)
 #   docker compose down                 stop and remove everything
 #
 # Compose puts all five containers on one private network where each is
@@ -15,7 +16,7 @@ x-node: &node
     target: runtime          # the slim stage of the Dockerfile
   image: matchmesh-node
   init: true                 # forwards Ctrl+C / docker stop to the node properly
-  restart: "no"              # a crashed node stays down; failover is Phase 5
+  restart: "no"              # a killed node stays down until you start it again
   healthcheck:
     # Healthy once the node answers a Heartbeat ping on its own port.
     test: ["CMD", "matchmesh_node", "--id", "healthcheck", "--ping", "localhost:50051"]
@@ -50,3 +51,20 @@ services:
     <<: *node
     environment: { <<: *env, MATCHMESH_NODE_ID: node-e }
     ports: ["50055:50051"]
+
+  # The load generator. Not started by `up` (it's in the "tools" profile);
+  # run it on demand once the cluster is up:
+  #   docker compose run --rm loadgen                      10,000 players at 1,000/s
+  #   docker compose run --rm loadgen --rate 3000          extra flags go to matchmesh_loadgen
+  loadgen:
+    image: matchmesh-node
+    profiles: ["tools"]
+    entrypoint: ["matchmesh_loadgen"]
+    environment:
+      MATCHMESH_TARGETS: node-a:50051,node-b:50051,node-c:50051,node-d:50051,node-e:50051
+    depends_on:
+      node-a: { condition: service_healthy }
+      node-b: { condition: service_healthy }
+      node-c: { condition: service_healthy }
+      node-d: { condition: service_healthy }
+      node-e: { condition: service_healthy }
