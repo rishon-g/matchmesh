@@ -111,9 +111,15 @@ TEST(LoadRunnerTest, LatencyCountsTheTimeAPlayerWaitedToBeSent) {
     const RunResult run = run_load(plan, config);
 
     ASSERT_EQ(run.enqueue_latency.count(), 200u);
-    // Waits grow steadily down the line: the middle player waited for ~100
-    // others, the first few for almost none.
-    EXPECT_GE(run.enqueue_latency.percentile(50), run.enqueue_latency.percentile(1) * 10);
+    // All 200 were due at the same instant and one thread sends them in
+    // order, so each reply comes after the previous one: every player's wait
+    // must be longer than the one before. (Comparing percentiles instead was
+    // flaky: the first call also pays for opening the connection, and that
+    // delay is added to everyone's wait, shrinking the gap.) Timed from the
+    // moment of sending, the waits would come out in no particular order.
+    for (std::size_t k = 1; k < run.players.size(); ++k) {
+        ASSERT_GT(run.players[k].latency, run.players[k - 1].latency) << "player " << k;
+    }
 }
 
 TEST(LoadRunnerTest, ADeadTargetIsRetriedOnTheNextOne) {
