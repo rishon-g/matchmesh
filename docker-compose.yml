@@ -56,7 +56,11 @@ services:
   # run it on demand once the cluster is up:
   #   docker compose run --rm loadgen                      10,000 players at 1,000/s
   #   docker compose run --rm loadgen --rate 3000          extra flags go to matchmesh_loadgen
+  # Add --build after `run` to rebuild the image first if the code changed.
   loadgen:
+    build:
+      context: .
+      target: runtime
     image: matchmesh-node
     profiles: ["tools"]
     entrypoint: ["matchmesh_loadgen"]

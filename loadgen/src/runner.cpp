@@ -3,7 +3,6 @@
 #include <algorithm>
 #include <atomic>
 #include <memory>
-#include <set>
 #include <stdexcept>
 #include <thread>
 #include <utility>
@@ -108,7 +107,7 @@ Clock::time_point enqueue(const Targets& targets, std::size_t index, const RunCo
             return Clock::now();
         }
         std::this_thread::sleep_for(backoff);
-        backoff = std::min(backoff * 2, std::chrono::milliseconds(500));
+        backoff = std::min(backoff * 2, std::chrono::milliseconds(250));
     }
 }
 
@@ -149,20 +148,6 @@ bool check(const Targets& targets, std::size_t index, int round, const RunConfig
 
 }  // namespace
 
-std::size_t RunResult::count(FinalStatus status) const {
-    return static_cast<std::size_t>(std::ranges::count(players, status, &PlayerResult::status));
-}
-
-std::size_t RunResult::lobbies() const {
-    std::set<std::string> ids;
-    for (const PlayerResult& player : players) {
-        if (player.status == FinalStatus::kInLobby) {
-            ids.insert(player.lobby_id);
-        }
-    }
-    return ids.size();
-}
-
 RunResult run_load(const std::vector<PlannedPlayer>& plan, const RunConfig& config) {
     const Targets targets(config.targets);
     const std::size_t thread_count = std::max<std::size_t>(1, config.threads);
@@ -187,7 +172,8 @@ RunResult run_load(const std::vector<PlannedPlayer>& plan, const RunConfig& conf
             std::this_thread::sleep_until(scheduled);
             const Clock::time_point replied = enqueue(targets, i, config, run.players[i]);
             if (run.players[i].enqueued) {
-                latencies[t].record(replied - scheduled);  // failures are counted, not timed
+                run.players[i].latency = replied - scheduled;
+                latencies[t].record(run.players[i].latency);  // failures are counted, not timed
             }
             if (const std::size_t done = ++sent; config.progress && done % 1'000 == 0) {
                 config.progress("sent " + std::to_string(done) + " of " +
