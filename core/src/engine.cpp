@@ -7,12 +7,12 @@
 
 namespace matchmesh::core {
 
-MatchmakingEngine::MatchmakingEngine(std::string node_id, EngineConfig config, ClockFn clock,
+MatchmakingEngine::MatchmakingEngine(std::string lobby_id_prefix, EngineConfig config, ClockFn clock,
                                      Replicator* replicator)
     : config_(config),
       clock_(std::move(clock)),
       replicator_(replicator),
-      matcher_(std::move(node_id), config.match) {
+      matcher_(std::move(lobby_id_prefix), config.match) {
     if (!clock_) {
         throw std::invalid_argument("clock must be callable");
     }

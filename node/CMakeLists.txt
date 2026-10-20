@@ -9,7 +9,8 @@ add_library(matchmesh_node_lib
     src/router.cpp
     src/cluster_manager.cpp
     src/replication_client.cpp
-    src/shard_manager.cpp)
+    src/shard_manager.cpp
+    src/identity.cpp)
 target_include_directories(matchmesh_node_lib PUBLIC include)
 # PUBLIC: code that uses these services also sees core's and proto's types.
 target_link_libraries(matchmesh_node_lib

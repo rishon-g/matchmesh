@@ -28,7 +28,6 @@
 #include <map>
 #include <memory>
 #include <optional>
-#include <random>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -43,6 +42,7 @@
 #include "matchmesh/core/version.hpp"
 #include "matchmesh/node/cluster_manager.hpp"
 #include "matchmesh/node/cluster_service.hpp"
+#include "matchmesh/node/identity.hpp"
 #include "matchmesh/node/matchmaking_service.hpp"
 #include "matchmesh/node/replication_client.hpp"
 #include "matchmesh/node/router.hpp"
@@ -131,20 +131,6 @@ bool parse_args(int argc, char** argv, Options& out) {
     return out.listen_address.empty() != out.ping_target.empty();
 }
 
-// A random, non-zero number identifying this run of the process, so peers
-// can tell a restarted node (which has lost its memory) from one that kept
-// running.
-std::uint64_t new_incarnation() {
-    std::random_device device;
-    std::uint64_t value = 0;
-    while (value == 0) {
-        value = (std::uint64_t{device()} << 32) ^ std::uint64_t{device()} ^
-                static_cast<std::uint64_t>(
-                    std::chrono::steady_clock::now().time_since_epoch().count());
-    }
-    return value;
-}
-
 int run_server(const Options& options) {
     // Route Ctrl+C (SIGINT) and `docker stop` (SIGTERM) to one dedicated
     // thread instead of interrupting whichever thread happens to be running.
@@ -173,13 +159,14 @@ int run_server(const Options& options) {
     // first, then the services, the cluster manager's and shard manager's
     // threads, the engine's workers, and only then what they all use
     // (replication client, router, membership).
-    const std::uint64_t incarnation = new_incarnation();
+    const std::uint64_t incarnation = matchmesh::node::new_incarnation();
     matchmesh::core::Membership membership(options.node_id, all_nodes,
                                            matchmesh::core::Clock::now(), {}, incarnation);
     matchmesh::node::Router router(options.node_id, peers);
     matchmesh::node::ReplicationClient replication(router);
     matchmesh::core::MatchmakingEngine engine(
-        options.node_id, matchmesh::core::EngineConfig{.worker_count = options.workers},
+        matchmesh::node::lobby_id_prefix(options.node_id, incarnation),
+        matchmesh::core::EngineConfig{.worker_count = options.workers},
         matchmesh::core::Clock::now, &replication);
     matchmesh::node::ShardManager shards(engine, router, replication, incarnation);
     matchmesh::node::ClusterManager cluster(membership, router, options.listen_address, {},

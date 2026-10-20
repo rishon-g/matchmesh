@@ -27,6 +27,7 @@
 #include "matchmesh/node/cluster_manager.hpp"
 #include "matchmesh/node/cluster_service.hpp"
 #include "matchmesh/node/convert.hpp"
+#include "matchmesh/node/identity.hpp"
 #include "matchmesh/node/matchmaking_service.hpp"
 #include "matchmesh/node/replication_client.hpp"
 #include "matchmesh/node/router.hpp"
@@ -116,7 +117,7 @@ public:
         node->replication =
             std::make_unique<ReplicationClient>(*node->router, timing_.replicate_timeout);
         node->engine = std::make_unique<core::MatchmakingEngine>(
-            id, core::EngineConfig{.worker_count = 0}, core::Clock::now,
+            lobby_id_prefix(id, incarnation), core::EngineConfig{.worker_count = 0}, core::Clock::now,
             node->replication.get());
         node->shards = std::make_unique<ShardManager>(*node->engine, *node->router,
                                                       *node->replication, incarnation,
@@ -586,6 +587,41 @@ TEST(ClusterTest, ARestartedNodeGetsItsQueuesBackWithEveryoneInThem) {
     ASSERT_TRUE(info.has_value());
     EXPECT_EQ(info->role, core::ShardRole::kPrimary);
     EXPECT_EQ(info->queued, 5u);
+}
+
+TEST(ClusterTest, ARestartedNodeNeverReusesALobbyId) {
+    // Found by scripts/chaos.sh: a restarted node's lobby counter starts
+    // again at 1, so without the run's incarnation in the ID it handed out
+    // "node-c-1" again, for a different lobby.
+    TestCluster cluster(kThree, kFast);
+    ASSERT_TRUE(eventually([&] { return cluster.settled(); }));
+    const std::string region = region_owned_by("node-c");
+    const auto form_lobby = [&](const std::string& prefix) -> std::string {
+        for (int i = 0; i < 4; ++i) {
+            const auto status = [&] {
+                return cluster.enqueue_via("node-a", prefix + std::to_string(i), region).ok();
+            };
+            EXPECT_TRUE(eventually(status));
+        }
+        EXPECT_EQ(cluster.engine_of("node-c").run_match_pass(core::Clock::now()), 1u);
+        const auto answer = cluster.lobby_of("node-a", prefix + "0", region);
+        return answer ? answer->response.lobby().lobby_id() : "";
+    };
+
+    const std::string first = form_lobby("before");
+    cluster.crash("node-c");
+    ASSERT_TRUE(eventually([&] { return cluster.all_agree_on({"node-a", "node-b"}); }));
+    cluster.start("node-c");
+    ASSERT_TRUE(eventually([&] { return cluster.settled(); }));
+    const std::string second = form_lobby("after");
+
+    ASSERT_FALSE(first.empty());
+    ASSERT_FALSE(second.empty());
+    EXPECT_NE(first, second);
+    EXPECT_EQ(first.rfind("node-c-", 0), 0u);
+    EXPECT_EQ(second.rfind("node-c-", 0), 0u);
+    // And the first lobby, carried through the restart, still says the same.
+    EXPECT_EQ(cluster.lobby_of("node-a", "before0", region)->response.lobby().lobby_id(), first);
 }
 
 TEST(ClusterTest, ReplicationFromAnOlderEpochOrTheWrongNodeIsRejected) {
