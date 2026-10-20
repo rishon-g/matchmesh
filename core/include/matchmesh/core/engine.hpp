@@ -112,13 +112,15 @@ class MatchmakingEngine {
 public:
     using ClockFn = std::function<TimePoint()>;
 
-    // node_id prefixes lobby IDs so they are unique across the cluster.
+    // `lobby_id_prefix` starts every lobby ID, so IDs are unique across the
+    // cluster: the node passes its ID plus its run's incarnation (see
+    // node/identity.hpp), since a restarted node's counter starts again at 1.
     // `clock` lets tests control time; production uses the real clock. It may
     // be called from several threads at once. `replicator` (optional, must
     // outlive the engine) receives every change before it is applied;
     // without one the engine is a plain single-node engine.
     // Throws std::invalid_argument for a bad config.
-    explicit MatchmakingEngine(std::string node_id, EngineConfig config = {},
+    explicit MatchmakingEngine(std::string lobby_id_prefix, EngineConfig config = {},
                                ClockFn clock = Clock::now, Replicator* replicator = nullptr);
 
     // Stops the workers and waits for them to finish.
