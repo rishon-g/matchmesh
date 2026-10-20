@@ -64,6 +64,7 @@ message HeartbeatResponse {
 message EnqueueOp {
   Player player = 1;
   google.protobuf.Timestamp enqueued_at = 2;  // so the copy keeps their wait time
+  string request_id = 3;                      // the client's idempotency key, if any
 }
 
 // A player left the queue.
@@ -81,6 +82,14 @@ message LobbyFormedOp {
 message WaitingPlayer {
   Player player = 1;
   google.protobuf.Timestamp enqueued_at = 2;
+  string request_id = 3;
+}
+
+// Which request put a player where they are now (queued or in a lobby), so a
+// retry of that request is recognised even after a failover.
+message JoinTicket {
+  string request_id = 1;
+  google.protobuf.Timestamp enqueued_at = 2;
 }
 
 // A complete copy of one queue: everyone waiting and every lobby it formed.
@@ -90,6 +99,7 @@ message ShardSnapshot {
   repeated WaitingPlayer waiting = 1;  // in arrival order
   repeated Lobby lobbies = 2;
   map<string, string> lobby_of = 3;    // player ID -> lobby ID
+  map<string, JoinTicket> tickets = 4; // player ID -> the join that put them there
 }
 
 message ReplicateRequest {

@@ -34,6 +34,16 @@ namespace matchmesh::core {
 struct PlayerJoined {
     Player player;
     TimePoint enqueued_at;
+    std::string request_id{};  // the client's idempotency key, if it sent one
+};
+
+// Which request put a player where they are now (queued, or in a lobby), so a
+// retry of that same request can be recognised and answered "already done".
+struct JoinTicket {
+    std::string request_id;
+    TimePoint enqueued_at;
+
+    bool operator==(const JoinTicket&) const = default;
 };
 
 // A player left the queue (cancelled).
@@ -68,6 +78,9 @@ struct ShardState {
     // Player ID -> lobby ID, for "which lobby is this player in?". Not every
     // member of a lobby is listed: one who has since queued again isn't.
     std::map<std::string, std::string> lobby_of;
+    // Player ID -> the join that put them in the queue or their lobby (only
+    // for joins that carried a request ID).
+    std::map<std::string, JoinTicket> tickets{};
 };
 
 // Ships a shard's changes to its backup. Implemented by the node layer.

@@ -247,12 +247,14 @@ public:
     bool running(const std::string& id) const { return nodes_.contains(id); }
 
     grpc::Status enqueue_via(const std::string& id, const std::string& player,
-                             const std::string& region, int rating = 1300) const {
+                             const std::string& region, int rating = 1300,
+                             const std::string& request_id = {}) const {
         const auto stub = v1::MatchmakingService::NewStub(
             grpc::CreateChannel(peers_.at(id), grpc::InsecureChannelCredentials()));
         v1::EnqueueRequest request;
         request.mutable_player()->set_player_id(player);
         request.mutable_player()->set_rating(rating);
+        request.set_request_id(request_id);
         request.set_region(region);
         request.set_game_mode("ranked");
         v1::EnqueueResponse response;
@@ -587,6 +589,38 @@ TEST(ClusterTest, ARestartedNodeGetsItsQueuesBackWithEveryoneInThem) {
     ASSERT_TRUE(info.has_value());
     EXPECT_EQ(info->role, core::ShardRole::kPrimary);
     EXPECT_EQ(info->queued, 5u);
+}
+
+TEST(ClusterTest, ARetryAfterALostReplyNeverJoinsAPlayerTwice) {
+    // Found by scripts/chaos.sh: the node relaying an enqueue died after the
+    // owner had added the player, so the client never heard "you're in" and
+    // retried, by then the player was in a lobby and the retry queued them
+    // again. Here the reply is "lost" by simply not looking at it.
+    TestCluster cluster(kThree, kFast);
+    ASSERT_TRUE(eventually([&] { return cluster.settled(); }));
+    const std::string region = region_owned_by("node-c");
+    const core::QueueKey queue = core::make_queue_key(region, "ranked", 1300);
+    for (int i = 0; i < 4; ++i) {
+        const std::string player = "p" + std::to_string(i);
+        ASSERT_TRUE(cluster.enqueue_via("node-a", player, region, 1300, "join-" + player).ok());
+    }
+    ASSERT_EQ(cluster.engine_of("node-c").run_match_pass(core::Clock::now()), 1u);
+    const std::string lobby = cluster.lobby_of("node-a", "p0", region)->response.lobby().lobby_id();
+
+    // The retry, through a different node: accepted as already done.
+    EXPECT_TRUE(cluster.enqueue_via("node-b", "p0", region, 1300, "join-p0").ok());
+    EXPECT_EQ(cluster.engine_of("node-c").shard_info(queue)->queued, 0u);
+
+    // Even when it only arrives after the owner died and its backup took over.
+    cluster.crash("node-c");
+    EXPECT_TRUE(eventually(
+        [&] { return cluster.enqueue_via("node-a", "p1", region, 1300, "join-p1").ok(); }));
+    const std::string new_owner = cluster.owner_according_to("node-a", queue);
+    EXPECT_EQ(cluster.engine_of(new_owner).shard_info(queue)->queued, 0u);
+    for (const char* player : {"p0", "p1", "p2", "p3"}) {
+        EXPECT_EQ(cluster.lobby_of("node-a", player, region)->response.lobby().lobby_id(), lobby)
+            << player;
+    }
 }
 
 TEST(ClusterTest, ARestartedNodeNeverReusesALobbyId) {

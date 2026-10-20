@@ -69,6 +69,7 @@ void to_proto(const core::ShardChange& in, v1::ReplicateRequest* out) {
     if (const auto* joined = std::get_if<core::PlayerJoined>(&in.op)) {
         to_proto(joined->player, out->mutable_enqueue()->mutable_player());
         to_proto(joined->enqueued_at, out->mutable_enqueue()->mutable_enqueued_at());
+        out->mutable_enqueue()->set_request_id(joined->request_id);
     } else if (const auto* left = std::get_if<core::PlayerLeft>(&in.op)) {
         out->mutable_cancel()->set_player_id(left->player_id);
     } else {
@@ -85,12 +86,18 @@ void to_proto(const core::ShardState& in, v1::ReplicateRequest* out) {
         v1::WaitingPlayer* entry = snapshot->add_waiting();
         to_proto(waiting.player, entry->mutable_player());
         to_proto(waiting.enqueued_at, entry->mutable_enqueued_at());
+        entry->set_request_id(waiting.request_id);
     }
     for (const core::Lobby& lobby : in.lobbies) {
         to_proto(lobby, snapshot->add_lobbies());
     }
     for (const auto& [player_id, lobby_id] : in.lobby_of) {
         (*snapshot->mutable_lobby_of())[player_id] = lobby_id;
+    }
+    for (const auto& [player_id, ticket] : in.tickets) {
+        v1::JoinTicket& out_ticket = (*snapshot->mutable_tickets())[player_id];
+        out_ticket.set_request_id(ticket.request_id);
+        to_proto(ticket.enqueued_at, out_ticket.mutable_enqueued_at());
     }
 }
 
@@ -99,7 +106,8 @@ std::optional<core::ShardChange> change_from_proto(const v1::ReplicateRequest& i
     switch (in.op_case()) {
         case v1::ReplicateRequest::kEnqueue:
             change.op = core::PlayerJoined{from_proto(in.enqueue().player()),
-                                           from_proto(in.enqueue().enqueued_at())};
+                                           from_proto(in.enqueue().enqueued_at()),
+                                           in.enqueue().request_id()};
             return change;
         case v1::ReplicateRequest::kCancel:
             change.op = core::PlayerLeft{in.cancel().player_id()};
@@ -115,17 +123,22 @@ std::optional<core::ShardChange> change_from_proto(const v1::ReplicateRequest& i
 }
 
 core::ShardState state_from_proto(const v1::ReplicateRequest& in) {
-    core::ShardState state{from_proto(in.queue()), in.sequence(), {}, {}, {}};
+    core::ShardState state{from_proto(in.queue()), in.sequence(), {}, {}, {}, {}};
     const v1::ShardSnapshot& snapshot = in.snapshot();
     state.waiting.reserve(static_cast<std::size_t>(snapshot.waiting_size()));
     for (const v1::WaitingPlayer& waiting : snapshot.waiting()) {
-        state.waiting.push_back(
-            core::PlayerJoined{from_proto(waiting.player()), from_proto(waiting.enqueued_at())});
+        state.waiting.push_back(core::PlayerJoined{from_proto(waiting.player()),
+                                                   from_proto(waiting.enqueued_at()),
+                                                   waiting.request_id()});
     }
     for (const v1::Lobby& lobby : snapshot.lobbies()) {
         state.lobbies.push_back(from_proto(lobby));
     }
     state.lobby_of.insert(snapshot.lobby_of().begin(), snapshot.lobby_of().end());
+    for (const auto& [player_id, ticket] : snapshot.tickets()) {
+        state.tickets.emplace(player_id,
+                              core::JoinTicket{ticket.request_id(), from_proto(ticket.enqueued_at())});
+    }
     return state;
 }
 

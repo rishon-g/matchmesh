@@ -45,7 +45,7 @@ MatchmakingEngine::~MatchmakingEngine() {
 // ---- Client changes: propose, replicate, apply ----
 
 EnqueueOutcome MatchmakingEngine::enqueue(Player player, std::string region,
-                                          std::string game_mode) {
+                                          std::string game_mode, std::string request_id) {
     QueueKey key = make_queue_key(std::move(region), std::move(game_mode), player.rating);
     if (player.id.empty()) {
         return {EnqueueResult::kInvalidPlayer, std::move(key), TimePoint{}};
@@ -66,13 +66,25 @@ EnqueueOutcome MatchmakingEngine::enqueue(Player player, std::string region,
             outcome.result = EnqueueResult::kNotPrimary;
             return outcome;
         }
+        // A retry of a join that already worked: the player is still where
+        // that request put them. Answer as the first attempt would have.
+        if (!request_id.empty()) {
+            const auto ticket = shard.tickets.find(player.id);
+            if (ticket != shard.tickets.end() && ticket->second.request_id == request_id &&
+                (shard.queue.contains(player.id) || shard.lobby_of.contains(player.id))) {
+                outcome.result = EnqueueResult::kAlreadyDone;
+                outcome.enqueued_at = ticket->second.enqueued_at;
+                return outcome;
+            }
+        }
         if (shard.queue.contains(player.id)) {
             outcome.result = EnqueueResult::kDuplicate;
             return outcome;
         }
         outcome.enqueued_at = clock_();
         change = ShardChange{shard.queue.key(), shard.sequence + 1,
-                             PlayerJoined{std::move(player), outcome.enqueued_at}};
+                             PlayerJoined{std::move(player), outcome.enqueued_at,
+                                          std::move(request_id)}};
     }
     // 2. Copy to the backup.
     if (!replicate(shard, change)) {
@@ -199,6 +211,7 @@ void MatchmakingEngine::install(const ShardState& state, ShardRole role) {
             // In arrival order, so equal ratings keep their tie-break order.
             (void)shard.queue.enqueue(joined.player, joined.enqueued_at);
         }
+        shard.tickets.insert(state.tickets.begin(), state.tickets.end());
         std::unordered_map<std::string, std::shared_ptr<const Lobby>> by_id;
         for (const Lobby& lobby : state.lobbies) {
             by_id.emplace(lobby.lobby_id, std::make_shared<const Lobby>(lobby));
@@ -366,10 +379,16 @@ bool MatchmakingEngine::apply_locked(Shard& shard, const ShardChange& change) {
         }
         // Rejoining after a finished lobby starts a fresh search.
         shard.lobby_of.erase(joined->player.id);
+        if (joined->request_id.empty()) {
+            shard.tickets.erase(joined->player.id);
+        } else {
+            shard.tickets[joined->player.id] = JoinTicket{joined->request_id, joined->enqueued_at};
+        }
     } else if (const auto* left = std::get_if<PlayerLeft>(&change.op)) {
         if (!shard.queue.remove(left->player_id)) {
             return false;
         }
+        shard.tickets.erase(left->player_id);  // that join is undone
     } else {
         const Lobby& lobby = std::get<LobbyFormed>(change.op).lobby;
         // Check every player first, so the lobby is applied whole or not at all.
@@ -392,7 +411,7 @@ bool MatchmakingEngine::apply_locked(Shard& shard, const ShardChange& change) {
 }
 
 ShardState MatchmakingEngine::state_locked(const Shard& shard) {
-    ShardState state{shard.queue.key(), shard.sequence, {}, {}, {}};
+    ShardState state{shard.queue.key(), shard.sequence, {}, {}, {}, {}};
 
     std::vector<const QueuedPlayer*> waiting;
     waiting.reserve(shard.queue.size());
@@ -402,8 +421,12 @@ ShardState MatchmakingEngine::state_locked(const Shard& shard) {
     std::ranges::sort(waiting, {}, &QueuedPlayer::arrival);
     state.waiting.reserve(waiting.size());
     for (const QueuedPlayer* entry : waiting) {
-        state.waiting.push_back(PlayerJoined{entry->player, entry->enqueued_at});
+        const auto ticket = shard.tickets.find(entry->player.id);
+        state.waiting.push_back(PlayerJoined{
+            entry->player, entry->enqueued_at,
+            ticket == shard.tickets.end() ? std::string{} : ticket->second.request_id});
     }
+    state.tickets.insert(shard.tickets.begin(), shard.tickets.end());
 
     std::unordered_set<const Lobby*> seen;
     for (const auto& [player_id, lobby] : shard.lobby_of) {
@@ -419,6 +442,7 @@ ShardState MatchmakingEngine::state_locked(const Shard& shard) {
 void MatchmakingEngine::clear_locked(Shard& shard) {
     shard.queue.clear();
     shard.lobby_of.clear();
+    shard.tickets.clear();
     shard.sequence = 0;
     shard.role.reset();
 }

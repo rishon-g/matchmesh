@@ -16,6 +16,7 @@
 #include <chrono>
 #include <cstdlib>
 #include <iostream>
+#include <random>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -150,6 +151,10 @@ int main(int argc, char** argv) {
 
     if (command == "enqueue") {
         matchmesh::v1::EnqueueRequest request;
+        // One ID for this join, reused by every retry below, so a retry
+        // after a lost reply can't put the player in the queue twice.
+        std::random_device device;
+        request.set_request_id("cli-" + std::to_string(device()) + std::to_string(device()));
         request.mutable_player()->set_player_id(player);
         request.mutable_player()->set_rating(rating);
         request.set_region(region);

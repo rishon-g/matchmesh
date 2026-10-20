@@ -185,10 +185,11 @@ grpc::Status MatchmakingServiceImpl::enqueue_locally(const v1::EnqueueRequest& r
                                                      v1::EnqueueResponse* response) {
     const core::EnqueueOutcome outcome =
         engine_.enqueue(core::Player{request.player().player_id(), request.player().rating()},
-                        request.region(), request.game_mode());
+                        request.region(), request.game_mode(), request.request_id());
 
     switch (outcome.result) {
         case core::EnqueueResult::kAdded:
+        case core::EnqueueResult::kAlreadyDone:  // a retry of a join that worked: same answer
             to_proto(outcome.queue, response->mutable_queue());
             to_proto(outcome.enqueued_at, response->mutable_enqueued_at());
             return grpc::Status::OK;

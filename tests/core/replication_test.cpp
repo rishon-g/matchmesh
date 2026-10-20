@@ -228,6 +228,64 @@ TEST_F(ReplicationTest, ReplicasAreNotMatchedAndRefuseClientChanges) {
     EXPECT_EQ(backup_.run_match_pass(now_), 1u);
 }
 
+// ---- Retries: the same request twice is one join ----
+
+TEST_F(ReplicationTest, ARetriedJoinIsRecognisedEvenAfterThePlayerWasMatched) {
+    // The scenario scripts/chaos.sh found: a join succeeds, the reply is lost
+    // (the node relaying it died), the player is matched, and then the
+    // client's retry arrives. It must not put them in the queue again.
+    replicator_.backup = &backup_;
+    for (int i = 0; i < 4; ++i) {
+        const std::string id = "p" + std::to_string(1200 + i);
+        ASSERT_EQ(primary_.enqueue({id, 1200 + i}, "us-west", "ranked", "req-" + id).result,
+                  EnqueueResult::kAdded);
+    }
+    const TimePoint joined_at = now_;
+    ASSERT_EQ(primary_.run_match_pass(now_), 1u);
+    const std::string lobby = primary_.lookup(ranked2_, "p1200").lobby->lobby_id;
+    const std::size_t changes = replicator_.changes.size();
+
+    now_ += 3s;
+    const auto retry = primary_.enqueue({"p1200", 1200}, "us-west", "ranked", "req-p1200");
+    EXPECT_EQ(retry.result, EnqueueResult::kAlreadyDone);
+    EXPECT_EQ(retry.enqueued_at, joined_at) << "answered as the first attempt was";
+    EXPECT_EQ(replicator_.changes.size(), changes) << "nothing to copy: nothing changed";
+    EXPECT_EQ(primary_.lookup(ranked2_, "p1200").lobby->lobby_id, lobby);
+    EXPECT_EQ(primary_.shard_info(ranked2_)->queued, 0u);
+
+    // After a failover the backup recognises the retry too.
+    backup_.set_role(ranked2_, ShardRole::kPrimary);
+    EXPECT_EQ(backup_.enqueue({"p1201", 1201}, "us-west", "ranked", "req-p1201").result,
+              EnqueueResult::kAlreadyDone);
+    EXPECT_EQ(backup_.shard_info(ranked2_)->queued, 0u);
+}
+
+TEST_F(ReplicationTest, ANewRequestIdIsANewJoin) {
+    enqueue_four(1200);
+    ASSERT_EQ(primary_.run_match_pass(now_), 1u);
+    // The match is over and the player queues up again: a different ID.
+    EXPECT_EQ(primary_.enqueue({"p1200", 1200}, "us-west", "ranked", "second-game").result,
+              EnqueueResult::kAdded);
+    EXPECT_EQ(primary_.lookup(ranked2_, "p1200").status, PlayerStatus::kQueued);
+    // Without an ID, a waiting player is still just a duplicate.
+    EXPECT_EQ(primary_.enqueue({"p1200", 1200}, "us-west", "ranked").result,
+              EnqueueResult::kDuplicate);
+}
+
+TEST_F(ReplicationTest, JoinTicketsTravelWithAFullCopy) {
+    ASSERT_EQ(primary_.enqueue({"alice", 1300}, "us-west", "ranked", "req-a").result,
+              EnqueueResult::kAdded);
+    enqueue_four(1200);
+    ASSERT_EQ(primary_.run_match_pass(now_), 1u);
+    const ShardState state = *primary_.snapshot(ranked2_);
+    EXPECT_EQ(state.tickets.at("alice").request_id, "req-a");
+
+    backup_.install(state, ShardRole::kPrimary);  // e.g. handed to a node that rejoined
+    EXPECT_EQ(backup_.enqueue({"alice", 1300}, "us-west", "ranked", "req-a").result,
+              EnqueueResult::kAlreadyDone);
+    EXPECT_EQ(backup_.shard_info(ranked2_)->queued, 1u);
+}
+
 // ---- Whole copies ----
 
 TEST_F(ReplicationTest, AMirroredBackupEndsUpIdentical) {

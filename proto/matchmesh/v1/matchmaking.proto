@@ -26,6 +26,13 @@ message EnqueueRequest {
   string game_mode = 3;
   // The skill bracket is not sent: the node derives it from player.rating,
   // so a client cannot pick its own bracket.
+
+  // Idempotency key: a client picks a new ID for each time a player joins,
+  // and sends the same ID on every retry of that join. If the first attempt
+  // actually succeeded (only its reply was lost), the retry is recognised
+  // and answered with the original result instead of joining the player a
+  // second time. Optional; without it every request is a new join.
+  string request_id = 4;
 }
 
 message EnqueueResponse {

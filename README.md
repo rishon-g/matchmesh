@@ -344,6 +344,41 @@ two lobbies or in a lobby and still queued (**in two places**), an inconsistent
 lobby, or a **ghost** (a player whose enqueue was reported as failed, found in a
 lobby anyway).
 
+### What it found
+
+The first runs failed, which is what a chaos test is for. Both bugs have
+regression tests in [`tests/node/cluster_test.cpp`](tests/node/cluster_test.cpp).
+
+1. **Lobby IDs reused after a restart.** A restarted node's lobby counter began
+   again at 1, so it handed out `node-b-1` a second time, for a different
+   lobby. Lobby IDs now include the run's incarnation number
+   (`node-b-9f3c2a1e-17`), so a restarted node can never repeat one.
+2. **A retried enqueue could join a player twice.** The node relaying an
+   enqueue died after the owner had added the player, so the client never got
+   its "you're in" and retried. By then the player had been matched, so the
+   retry queued them again, and they ended up in two lobbies. Enqueue now takes
+   an **idempotency key** (`request_id`): a client sends the same ID on every
+   retry of one join, and the owner (or, after a failover, its backup, since
+   the key is replicated) answers a repeat with the original result instead
+   of joining the player again.
+
+### Results
+
+Same 2-core machine as above, `--local`, five node processes:
+
+| Run | Players | Kills | Lost | In two places | Longest wait for "you're in" | Dropped from membership after |
+|---|---|---|---|---|---|---|
+| 2 rounds at 500/s, 4 seeds | 12,500 each | 8 | 0 | 0 | 1.56 to 2.07 s | 1.10 to 1.55 s |
+| 3 rounds at 1,000/s | 29,000 | 3 | 0 | 0 | 1.90 s | 1.18 to 1.47 s |
+
+A killed node is dropped from the membership 1.0 to 1.6 s after the kill (up
+to 1.5 s of silence, counted from its last heartbeat, which was up to 500 ms
+before the kill), and a restarted node is back in within about 0.1 s. The
+players whose queues lived on the killed node (7 to 10% of them per run) waited
+up to about 2 s while their queue failed over: detection, the hand-over, and up
+to 250 ms of the client's own retry backoff. Everyone else saw normal
+millisecond latencies.
+
 ## Service contracts
 
 The gRPC APIs live in [`proto/matchmesh/v1/`](proto/matchmesh/v1) (package `matchmesh.v1`).
