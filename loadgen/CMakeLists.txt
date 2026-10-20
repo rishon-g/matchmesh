@@ -1,12 +1,16 @@
 # loadgen: the 10,000-player load generator.
 
-# Histogram and workload: plain C++, no networking, so they're tested on
-# their own (including under ThreadSanitizer).
+# Histogram, workload, results and the invariant checker: plain C++, no
+# networking, so they're tested on their own (including under ThreadSanitizer).
 add_library(matchmesh_loadgen_lib
     src/histogram.cpp
-    src/workload.cpp)
+    src/workload.cpp
+    src/results.cpp
+    src/invariants.cpp)
 target_include_directories(matchmesh_loadgen_lib PUBLIC include)
-target_link_libraries(matchmesh_loadgen_lib PRIVATE matchmesh_warnings)
+target_link_libraries(matchmesh_loadgen_lib
+    PUBLIC matchmesh_core
+    PRIVATE matchmesh_warnings)
 
 # The runner talks gRPC to the cluster.
 add_library(matchmesh_loadgen_runner src/runner.cpp)

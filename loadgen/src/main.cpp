@@ -11,8 +11,9 @@
 //   --seed     random seed; the same seed gives the same players (default 42)
 //   --json     also write the results to this file, for scripts
 //
-// Exits 0 if every player was enqueued and the cluster knows where each one
-// is, 1 otherwise.
+// Afterwards it runs the lost-player invariant checker (see invariants.hpp):
+// everyone who was enqueued must be in exactly one lobby or still queued.
+// Exits 0 if every player was enqueued and every invariant holds, 1 otherwise.
 
 #include <chrono>
 #include <cstdio>
@@ -28,12 +29,14 @@
 
 #include "matchmesh/core/version.hpp"
 #include "matchmesh/loadgen/histogram.hpp"
+#include "matchmesh/loadgen/invariants.hpp"
 #include "matchmesh/loadgen/runner.hpp"
 #include "matchmesh/loadgen/workload.hpp"
 
 namespace {
 
 using matchmesh::loadgen::FinalStatus;
+using matchmesh::loadgen::InvariantReport;
 using matchmesh::loadgen::format_duration;
 using matchmesh::loadgen::LatencyHistogram;
 using matchmesh::loadgen::RunResult;
@@ -147,7 +150,8 @@ std::string histogram_json(const LatencyHistogram& h) {
     return out.str();
 }
 
-void write_json(const std::string& path, const Options& options, const RunResult& run) {
+void write_json(const std::string& path, const Options& options, const RunResult& run,
+                const InvariantReport& invariants) {
     std::ofstream out(path);
     out << "{\n"
         << "  \"players\": " << run.players.size() << ",\n"
@@ -157,6 +161,7 @@ void write_json(const std::string& path, const Options& options, const RunResult
         << "  \"seed\": " << options.workload.seed << ",\n"
         << "  \"send_seconds\": " << seconds(run.send_duration) << ",\n"
         << "  \"retries\": " << run.retries << ",\n"
+        << "  \"players_retried\": " << run.players_retried() << ",\n"
         << "  \"enqueue_latency\": " << histogram_json(run.enqueue_latency) << ",\n"
         << "  \"time_to_lobby\": " << histogram_json(run.time_to_lobby) << ",\n"
         << "  \"final\": {\"in_lobby\": " << run.count(FinalStatus::kInLobby)
@@ -165,6 +170,11 @@ void write_json(const std::string& path, const Options& options, const RunResult
         << ", \"never_enqueued\": " << run.count(FinalStatus::kNeverEnqueued)
         << ", \"unknown\": " << run.count(FinalStatus::kUnknown)
         << ", \"lobbies\": " << run.lobbies() << "},\n"
+        << "  \"invariants\": {\"ok\": " << (invariants.ok() ? "true" : "false")
+        << ", \"in_one_lobby\": " << invariants.in_one_lobby << ", \"queued\": " << invariants.queued
+        << ", \"lost\": " << invariants.lost << ", \"in_two_places\": " << invariants.in_two_places
+        << ", \"bad_lobbies\": " << invariants.bad_lobbies << ", \"ghosts\": " << invariants.ghosts
+        << "},\n"
         << "  \"served_by\": {";
     bool first = true;
     for (const auto& [node, count] : run.served_by) {
@@ -206,7 +216,8 @@ int main(int argc, char** argv) {
               << static_cast<std::size_t>(static_cast<double>(plan.size()) /
                                           seconds(run.send_duration))
               << " players/s); " << with_commas(failed) << " failed; "
-              << with_commas(run.retries) << " retries\n\n";
+              << with_commas(run.retries) << " retries ("
+              << with_commas(run.players_retried()) << " players needed more than one try)\n\n";
     print_histogram("Enqueue latency, from scheduled arrival to reply", run.enqueue_latency);
     std::cout << "\n";
     print_histogram("Time to lobby, server enqueue to lobby formed", run.time_to_lobby);
@@ -224,11 +235,23 @@ int main(int argc, char** argv) {
     }
     std::cout << std::endl;
 
+    const InvariantReport invariants = matchmesh::loadgen::check_invariants(run.players);
+    std::cout << "\nInvariants: " << (invariants.ok() ? "OK" : "VIOLATED") << ". "
+              << with_commas(invariants.in_one_lobby) << " in exactly one lobby, "
+              << with_commas(invariants.queued) << " still queued, " << invariants.lost
+              << " lost, " << invariants.in_two_places << " in two places, "
+              << invariants.bad_lobbies << " bad lobbies, " << invariants.ghosts << " ghosts"
+              << std::endl;
+    for (const std::string& problem : invariants.problems) {
+        std::cout << "  ! " << problem << "\n";
+    }
+    if (invariants.problems_not_shown > 0) {
+        std::cout << "  ! ... and " << invariants.problems_not_shown << " more\n";
+    }
+
     if (!options.json_path.empty()) {
-        write_json(options.json_path, options, run);
+        write_json(options.json_path, options, run, invariants);
         std::cout << "Wrote " << options.json_path << std::endl;
     }
-    const bool all_accounted = failed == 0 && run.count(FinalStatus::kNotFound) == 0 &&
-                               run.count(FinalStatus::kUnknown) == 0;
-    return all_accounted ? EXIT_SUCCESS : EXIT_FAILURE;
+    return failed == 0 && invariants.ok() ? EXIT_SUCCESS : EXIT_FAILURE;
 }

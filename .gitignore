@@ -41,3 +41,6 @@ Thumbs.db
 
 # ---- Local secrets / env ----
 .env
+
+# Output of scripts/chaos.sh
+chaos-results/

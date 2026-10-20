@@ -313,6 +313,37 @@ more cores will do better; the shape is what matters.
   together, so a hot queue can't be split across nodes. A real system would
   split brackets more finely where players are dense.
 
+## Chaos testing
+
+[`scripts/chaos.sh`](scripts/chaos.sh) kills random nodes while the load generator
+is running, brings them back, and then checks that nobody was lost.
+
+```bash
+./scripts/chaos.sh                         # against the Docker Compose cluster
+./scripts/chaos.sh --local                 # five local processes from build/release
+./scripts/chaos.sh --rounds 3 --down 3 --rate 1000 --seed 101
+```
+
+Each round it `kill -9`s a random node (`docker compose kill` sends SIGKILL, so
+there's no clean shutdown), times how long the others take to drop it from the
+membership, leaves it down, restarts it with empty memory, and times how long
+it takes to be a member again. The same `--seed` picks the same victims and
+the same players. Results land in `chaos-results/`.
+
+**The invariant checker** ([`loadgen/src/invariants.cpp`](loadgen/src/invariants.cpp))
+runs after every load test, chaos or not. Every player who was told "you're in"
+must be in exactly one place:
+
+- in **exactly one lobby**, and that lobby must be consistent: every member
+  reports the same four players, all from the same queue, and every member says
+  it is in that lobby; or
+- **still queued**, and in no lobby.
+
+It fails the run for a player the cluster has forgotten (**lost**), a player in
+two lobbies or in a lobby and still queued (**in two places**), an inconsistent
+lobby, or a **ghost** (a player whose enqueue was reported as failed, found in a
+lobby anyway).
+
 ## Service contracts
 
 The gRPC APIs live in [`proto/matchmesh/v1/`](proto/matchmesh/v1) (package `matchmesh.v1`).

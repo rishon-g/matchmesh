@@ -25,7 +25,8 @@ gtest_discover_tests(matchmesh_core_tests)
 # ---- Load generator: histogram and workload (no networking) ----
 add_executable(matchmesh_loadgen_tests
     loadgen/histogram_test.cpp
-    loadgen/workload_test.cpp)
+    loadgen/workload_test.cpp
+    loadgen/invariants_test.cpp)
 target_link_libraries(matchmesh_loadgen_tests
     PRIVATE matchmesh_loadgen_lib GTest::gtest_main matchmesh_warnings)
 gtest_discover_tests(matchmesh_loadgen_tests)
