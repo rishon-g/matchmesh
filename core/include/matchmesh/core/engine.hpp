@@ -105,7 +105,7 @@ struct ShardInfo {
 struct EnqueueOutcome {
     EnqueueResult result;
     QueueKey queue;          // the queue the player was placed in (or would have been)
-    TimePoint enqueued_at;   // meaningful only when result == kAdded
+    TimePoint enqueued_at;   // when result is kAdded, or kAlreadyDone (the original time)
 };
 
 class MatchmakingEngine {
@@ -132,7 +132,14 @@ public:
     // Puts a player in the queue for this region and game mode. The skill
     // bracket comes from their rating. A queue this node has never seen
     // starts here as a primary.
-    EnqueueOutcome enqueue(Player player, std::string region, std::string game_mode);
+    //
+    // `request_id` makes retries safe: if the player is still where an
+    // earlier request with the same ID put them (queued, or in the lobby
+    // they were matched into), nothing changes and the result is
+    // kAlreadyDone with the original enqueued_at. A different ID (or none)
+    // is a new join, so a player can queue again after a finished match.
+    EnqueueOutcome enqueue(Player player, std::string region, std::string game_mode,
+                           std::string request_id = {});
 
     // Removes a waiting player.
     CancelResult cancel(const QueueKey& queue, const std::string& player_id);
@@ -189,6 +196,8 @@ private:
         mutable std::mutex mutex;  // guards everything below
         SkillQueue queue;
         std::unordered_map<std::string, std::shared_ptr<const Lobby>> lobby_of;
+        // Player -> the request that put them in the queue or their lobby.
+        std::unordered_map<std::string, JoinTicket> tickets;
         // Empty when the queue isn't held here (never seen, or dropped).
         // Changed only with both locks held.
         std::optional<ShardRole> role;

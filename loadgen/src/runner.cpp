@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cstdio>
+#include <random>
 #include <memory>
 #include <stdexcept>
 #include <thread>
@@ -69,11 +71,23 @@ void on_threads(std::size_t count, Work work) {
     }
 }
 
-// Sends one player, retrying while the cluster says "try again". Returns the
-// time the final reply arrived.
+// A random tag for this run, so request IDs from separate runs never collide
+// (the same seed reuses the same player IDs).
+std::string new_run_tag() {
+    std::random_device device;
+    char tag[17];
+    std::snprintf(tag, sizeof tag, "%08x%08x", device(), device());
+    return tag;
+}
+
+// Sends one player, retrying while the cluster says "try again". Every
+// attempt carries the same request ID, so if an earlier attempt worked and
+// only its reply was lost, the retry is recognised instead of joining the
+// player twice. Returns the time the final reply arrived.
 Clock::time_point enqueue(const Targets& targets, std::size_t index, const RunConfig& config,
-                          PlayerResult& result) {
+                          const std::string& run_tag, PlayerResult& result) {
     v1::EnqueueRequest request;
+    request.set_request_id(result.player.id + "@" + run_tag);
     request.mutable_player()->set_player_id(result.player.id);
     request.mutable_player()->set_rating(result.player.rating);
     request.set_region(result.player.region);
@@ -150,6 +164,7 @@ bool check(const Targets& targets, std::size_t index, int round, const RunConfig
 
 RunResult run_load(const std::vector<PlannedPlayer>& plan, const RunConfig& config) {
     const Targets targets(config.targets);
+    const std::string run_tag = new_run_tag();
     const std::size_t thread_count = std::max<std::size_t>(1, config.threads);
     RunResult run;
     run.players.reserve(plan.size());
@@ -170,7 +185,8 @@ RunResult run_load(const std::vector<PlannedPlayer>& plan, const RunConfig& conf
         for (std::size_t i = t; i < plan.size(); i += thread_count) {
             const Clock::time_point scheduled = start + plan[i].arrives_at;
             std::this_thread::sleep_until(scheduled);
-            const Clock::time_point replied = enqueue(targets, i, config, run.players[i]);
+            const Clock::time_point replied =
+                enqueue(targets, i, config, run_tag, run.players[i]);
             if (run.players[i].enqueued) {
                 run.players[i].latency = replied - scheduled;
                 latencies[t].record(run.players[i].latency);  // failures are counted, not timed

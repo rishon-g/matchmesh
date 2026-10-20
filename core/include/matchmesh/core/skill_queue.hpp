@@ -34,6 +34,7 @@ enum class EnqueueResult {
     // Only from MatchmakingEngine, which adds replication on top:
     kNotPrimary,     // this node keeps only a replica of the queue
     kNotReplicated,  // the backup didn't confirm it, so nothing changed; safe to retry
+    kAlreadyDone,    // this exact request (same request ID) already succeeded; nothing changed
 };
 
 class SkillQueue {
