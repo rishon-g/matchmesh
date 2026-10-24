@@ -149,5 +149,20 @@ TEST_F(SkillQueueTest, PlayerCanRejoinAfterCancelling) {
     EXPECT_EQ(queue_.begin()->enqueued_at, t0_ + 5s);
 }
 
+TEST_F(SkillQueueTest, ClearEmptiesTheQueue) {
+    ASSERT_EQ(queue_.enqueue({"alice", 1100}, t0_), EnqueueResult::kAdded);
+    ASSERT_EQ(queue_.enqueue({"bob", 1200}, t0_), EnqueueResult::kAdded);
+
+    queue_.clear();
+
+    EXPECT_TRUE(queue_.empty());
+    EXPECT_EQ(queue_.begin(), queue_.end());
+    EXPECT_FALSE(queue_.contains("alice"));
+    EXPECT_FALSE(queue_.remove("bob").has_value());
+    // The key survives, and the queue is usable again.
+    EXPECT_EQ(queue_.key(), make_queue_key("us-west", "ranked", 1300));
+    EXPECT_EQ(queue_.enqueue({"alice", 1100}, t0_ + 1s), EnqueueResult::kAdded);
+}
+
 }  // namespace
 }  // namespace matchmesh::core
