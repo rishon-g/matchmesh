@@ -66,8 +66,8 @@ public:
 
     // Up to `count` *distinct* nodes for `key`, in clockwise order: the owner
     // first, then the next different node, and so on. owners(key, 2)[1] is
-    // the key's backup node (used for replication in Phase 5). Returns fewer
-    // than `count` if the ring has fewer nodes.
+    // the key's backup node, which replication copies every change to.
+    // Returns fewer than `count` if the ring has fewer nodes.
     [[nodiscard]] std::vector<std::string> owners(std::string_view key, std::size_t count) const;
     [[nodiscard]] std::vector<std::string> owners(const QueueKey& key, std::size_t count) const;
 

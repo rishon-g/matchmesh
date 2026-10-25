@@ -3,8 +3,8 @@
 // SkillQueue: the players waiting in one queue, kept sorted by rating so the
 // closest-skill neighbours are always next to each other.
 //
-// Not thread-safe on its own. Phase 3 puts one mutex in front of each queue
-// (lock striping).
+// Not thread-safe on its own. MatchmakingEngine puts one mutex in front of
+// each queue (lock striping).
 
 #include <cstddef>
 #include <cstdint>

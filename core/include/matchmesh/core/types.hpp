@@ -28,8 +28,8 @@ struct Player {
     bool operator==(const Player&) const = default;
 };
 
-// Identifies one queue. It is also the shard key: in Phase 4 the hash ring
-// decides which node owns a queue by hashing this key. Players are sharded
+// Identifies one queue. It is also the shard key: the hash ring decides
+// which node owns a queue by hashing this key. Players are sharded
 // by queue, not by player, because players who can be matched together must
 // all live on the same node.
 struct QueueKey {
@@ -48,7 +48,7 @@ struct QueueKey {
                                       std::int32_t rating);
 
 // Human-readable form such as "us-west/ranked/2". Also a stable string to
-// hash onto the ring later.
+// hash onto the ring.
 [[nodiscard]] std::string to_string(const QueueKey& key);
 
 // Lets QueueKey be used as the key of a std::unordered_map.
