@@ -3,7 +3,7 @@
 namespace matchmesh::core {
 
 std::string_view version() noexcept {
-    return "0.1.0";
+    return MATCHMESH_VERSION;
 }
 
 }  // namespace matchmesh::core
