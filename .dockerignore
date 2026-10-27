@@ -6,3 +6,4 @@ dashboard/node_modules/
 dashboard/dist/
 .vscode/
 .idea/
+chaos-results/
