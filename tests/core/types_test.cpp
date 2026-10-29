@@ -34,6 +34,20 @@ TEST(QueueKeyTest, ToStringJoinsFieldsWithSlashes) {
     EXPECT_EQ(to_string(make_queue_key("us-west", "ranked", 1300)), "us-west/ranked/2");
 }
 
+TEST(QueueKeyTest, ToStringHandlesMultiDigitAndNegativeRatings) {
+    EXPECT_EQ(to_string(make_queue_key("eu", "casual", 5250)), "eu/casual/10");
+    EXPECT_EQ(to_string(make_queue_key("eu", "casual", -20)), "eu/casual/0");
+}
+
+TEST(QueueKeyTest, HashChangesWithEachField) {
+    const QueueKeyHash hash;
+    const QueueKey base = make_queue_key("us-west", "ranked", 1300);
+    EXPECT_EQ(hash(base), hash(make_queue_key("us-west", "ranked", 1499)));
+    EXPECT_NE(hash(base), hash(make_queue_key("eu", "ranked", 1300)));
+    EXPECT_NE(hash(base), hash(make_queue_key("us-west", "casual", 1300)));
+    EXPECT_NE(hash(base), hash(make_queue_key("us-west", "ranked", 1500)));
+}
+
 TEST(QueueKeyTest, PlayersInTheSameBandShareAQueue) {
     EXPECT_EQ(make_queue_key("eu", "casual", 1000), make_queue_key("eu", "casual", 1499));
     EXPECT_NE(make_queue_key("eu", "casual", 1499), make_queue_key("eu", "casual", 1500));
