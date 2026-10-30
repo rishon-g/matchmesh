@@ -169,6 +169,20 @@ TEST(HashRingTest, OwnersAreDistinctAndStartWithTheOwner) {
     }
 }
 
+TEST(HashRingTest, OneOwnerIsJustTheOwner) {
+    const HashRing ring = five_node_ring();
+    for (int i = 0; i < 100; ++i) {
+        EXPECT_EQ(ring.owners(key_name(i), 1),
+                  (std::vector<std::string>{*ring.owner(key_name(i))}))
+            << key_name(i);
+    }
+}
+
+TEST(HashRingTest, ReportsItsVirtualNodeCount) {
+    EXPECT_EQ(HashRing().virtual_nodes_per_node(), HashRing::kDefaultVirtualNodes);
+    EXPECT_EQ(HashRing(7).virtual_nodes_per_node(), 7u);
+}
+
 TEST(HashRingTest, OwnersNeverReturnsMoreNodesThanExist) {
     HashRing ring;
     ring.add_node("node-a");
