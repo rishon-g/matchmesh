@@ -25,6 +25,15 @@ ctest --preset debug
 
 Presets (configure, build and test): `debug`, `release`, `tsan` (ThreadSanitizer).
 
+Every GoogleTest case is registered with ctest on its own, so you can run just
+the ones you're working on:
+
+```bash
+ctest --preset debug -R HashRing           # tests whose name matches a regex
+ctest --preset debug -E Cluster            # everything except the slow cluster tests
+ctest --preset debug --rerun-failed        # only what failed last time
+```
+
 ## Matchmaking engine (`core/`)
 
 A pure C++ library with no networking, so it can be tested in isolation.
