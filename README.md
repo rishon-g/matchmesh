@@ -111,7 +111,7 @@ Settings come from flags or environment variables:
 | `--id` | `MATCHMESH_NODE_ID` | `node-a` |
 | `--listen` | `MATCHMESH_LISTEN` | `0.0.0.0:50051` |
 | `--peers` | `MATCHMESH_PEERS` | `node-a=node-a:50051,node-b=node-b:50051,...` |
-| `--workers` | `MATCHMESH_WORKERS` | `4` |
+| `--workers` | `MATCHMESH_WORKERS` | `4` (1 to 256; default 4) |
 
 The node shuts down cleanly on Ctrl+C or `docker stop`. `matchmesh_cli` is a small
 client for trying it by hand (`enqueue`, `get-lobby`, `cancel`, `topology`). Like a
