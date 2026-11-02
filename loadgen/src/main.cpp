@@ -158,7 +158,8 @@ std::string histogram_json(const LatencyHistogram& h) {
     return out.str();
 }
 
-void write_json(const std::string& path, const Options& options, const RunResult& run,
+// Returns false if the file couldn't be written (bad path, disk full, ...).
+bool write_json(const std::string& path, const Options& options, const RunResult& run,
                 const InvariantReport& invariants) {
     std::ofstream out(path);
     out << "{\n"
@@ -190,6 +191,8 @@ void write_json(const std::string& path, const Options& options, const RunResult
         first = false;
     }
     out << "}\n}\n";
+    out.close();
+    return !out.fail();
 }
 
 }  // namespace
@@ -258,7 +261,10 @@ int main(int argc, char** argv) {
     }
 
     if (!options.json_path.empty()) {
-        write_json(options.json_path, options, run, invariants);
+        if (!write_json(options.json_path, options, run, invariants)) {
+            std::cerr << "could not write " << options.json_path << '\n';
+            return EXIT_FAILURE;
+        }
         std::cout << "Wrote " << options.json_path << std::endl;
     }
     return failed == 0 && invariants.ok() ? EXIT_SUCCESS : EXIT_FAILURE;
