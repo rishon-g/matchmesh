@@ -84,19 +84,25 @@ bool parse_args(int argc, char** argv, Options& out) {
             if (flag != "--targets" && flag != "--json" && value.starts_with('-')) {
                 return false;
             }
+            // How much of `value` a number parser read; anything left over
+            // ("5x") makes it not a number.
+            std::size_t used = value.size();
             if (flag == "--targets") {
                 out.targets = split(value);
             } else if (flag == "--players") {
-                out.workload.players = std::stoul(value);
+                out.workload.players = std::stoul(value, &used);
             } else if (flag == "--rate") {
-                out.workload.arrivals_per_second = std::stod(value);
+                out.workload.arrivals_per_second = std::stod(value, &used);
             } else if (flag == "--threads") {
-                out.threads = std::stoul(value);
+                out.threads = std::stoul(value, &used);
             } else if (flag == "--seed") {
-                out.workload.seed = std::stoull(value);
+                out.workload.seed = std::stoull(value, &used);
             } else if (flag == "--json") {
                 out.json_path = value;
             } else {
+                return false;
+            }
+            if (used != value.size()) {
                 return false;
             }
         }
