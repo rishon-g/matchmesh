@@ -39,6 +39,16 @@ TEST(HistogramTest, SmallValuesAreExact) {
     EXPECT_EQ(h.mean(), 5us);  // 55 / 10, rounded down
 }
 
+TEST(HistogramTest, PercentilesOutsideZeroToHundredAreClamped) {
+    LatencyHistogram h;
+    for (int us = 1; us <= 10; ++us) {
+        h.record(microseconds(us));
+    }
+    EXPECT_EQ(h.percentile(0), 1us);  // the smallest sample
+    EXPECT_EQ(h.percentile(-5), 1us);
+    EXPECT_EQ(h.percentile(150), 10us);
+}
+
 TEST(HistogramTest, LargeValuesAreWithinOneSixtyFourth) {
     for (const std::int64_t us : {100LL, 1'234LL, 99'999LL, 2'500'000LL, 3'600'000'000LL}) {
         LatencyHistogram h;
