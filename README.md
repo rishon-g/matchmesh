@@ -34,6 +34,18 @@ ctest --preset debug -E Cluster            # everything except the slow cluster 
 ctest --preset debug --rerun-failed        # only what failed last time
 ```
 
+## Repository layout
+
+| Path | What's there |
+|---|---|
+| `core/` | The matchmaking engine, hash ring and membership logic. Pure C++, no networking |
+| `proto/` | gRPC service contracts; C++ is generated from them at build time |
+| `node/` | The node server (`matchmesh_node`) and the `matchmesh_cli` client |
+| `loadgen/` | The load generator (`matchmesh_loadgen`) and the invariant checker |
+| `tests/` | GoogleTest suites: `core/`, `loadgen/`, `node/` (real in-process nodes) and `stress/` |
+| `scripts/` | Smoke test, cluster demo and chaos test |
+| `gateway/`, `dashboard/` | Placeholders for upcoming phases |
+
 ## Matchmaking engine (`core/`)
 
 A pure C++ library with no networking, so it can be tested in isolation.
