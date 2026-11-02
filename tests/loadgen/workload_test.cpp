@@ -111,6 +111,16 @@ TEST(WorkloadTest, NonsenseConfigsAreRejected) {
     WorkloadConfig no_regions;
     no_regions.regions = {{"eu", 0.0}};
     EXPECT_THROW((void)make_workload(no_regions), std::invalid_argument);
+
+    EXPECT_THROW((void)make_workload({.arrivals_per_second = INFINITY}), std::invalid_argument);
+    EXPECT_THROW((void)make_workload({.arrivals_per_second = NAN}), std::invalid_argument);
+    EXPECT_THROW((void)make_workload({.rating_stddev = -1}), std::invalid_argument);
+    WorkloadConfig no_modes;
+    no_modes.modes.clear();
+    EXPECT_THROW((void)make_workload(no_modes), std::invalid_argument);
+    WorkloadConfig unnamed_region;
+    unnamed_region.regions = {{"", 1.0}};
+    EXPECT_THROW((void)make_workload(unnamed_region), std::invalid_argument);
 }
 
 }  // namespace
