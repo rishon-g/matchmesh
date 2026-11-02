@@ -16,6 +16,7 @@
 // Exits 0 if every player was enqueued and every invariant holds, 1 otherwise.
 
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
@@ -78,6 +79,11 @@ bool parse_args(int argc, char** argv, Options& out) {
                 return false;
             }
             const std::string value = argv[++i];
+            // Every other flag is a number that can't be negative, and stoul
+            // would silently wrap "-5" around to a huge count.
+            if (flag != "--targets" && flag != "--json" && value.starts_with('-')) {
+                return false;
+            }
             if (flag == "--targets") {
                 out.targets = split(value);
             } else if (flag == "--players") {
@@ -97,7 +103,9 @@ bool parse_args(int argc, char** argv, Options& out) {
     } catch (const std::exception&) {
         return false;  // a number that wasn't one
     }
-    return !out.targets.empty() && out.threads > 0;
+    // make_workload would throw on a rate like "nan" or "inf".
+    return !out.targets.empty() && out.threads > 0 &&
+           std::isfinite(out.workload.arrivals_per_second);
 }
 
 std::string with_commas(std::size_t n) {
