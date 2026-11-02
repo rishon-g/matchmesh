@@ -13,12 +13,14 @@
 // UNAVAILABLE (a node is down and its backup is taking over, or the cluster
 // is still starting) for up to 10 s. Exits 0 on success, 1 on any error.
 
+#include <charconv>
 #include <chrono>
 #include <cstdlib>
 #include <iostream>
 #include <random>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <thread>
 #include <vector>
 
@@ -120,9 +122,11 @@ int main(int argc, char** argv) {
     const std::string& region = args[5];
     const std::string& mode = args[6];
     int rating = 0;
-    try {
-        rating = std::stoi(args[4]);
-    } catch (const std::exception&) {
+    const std::string& rating_text = args[4];
+    // from_chars, unlike stoi, refuses "1300x" instead of reading it as 1300.
+    if (const auto [end, error] =
+            std::from_chars(rating_text.data(), rating_text.data() + rating_text.size(), rating);
+        error != std::errc{} || end != rating_text.data() + rating_text.size()) {
         std::cerr << "rating must be a number\n";
         return EXIT_FAILURE;
     }
