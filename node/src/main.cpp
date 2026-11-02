@@ -21,6 +21,7 @@
 //   --peers    MATCHMESH_PEERS
 //   --workers  MATCHMESH_WORKERS
 
+#include <charconv>
 #include <chrono>
 #include <csignal>
 #include <cstdlib>
@@ -31,6 +32,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <thread>
 #include <vector>
 
@@ -76,16 +78,16 @@ std::optional<std::string> env(const char* name) {
 }
 
 bool parse_workers(const std::string& value, std::size_t& out) {
-    try {
-        const unsigned long parsed = std::stoul(value);
-        if (parsed == 0 || parsed > 256) {
-            return false;
-        }
-        out = parsed;
-        return true;
-    } catch (const std::exception&) {
-        return false;  // not a number
+    // from_chars, unlike stoul, rejects a sign and anything after the digits
+    // ("4x"), instead of quietly using the leading number.
+    std::size_t parsed = 0;
+    const auto [end, error] = std::from_chars(value.data(), value.data() + value.size(), parsed);
+    if (error != std::errc{} || end != value.data() + value.size() || parsed == 0 ||
+        parsed > 256) {
+        return false;
     }
+    out = parsed;
+    return true;
 }
 
 // Returns false if the arguments don't make sense.
