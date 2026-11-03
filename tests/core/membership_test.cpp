@@ -66,6 +66,13 @@ TEST(MembershipTest, RejectsASelfThatIsNotInTheCluster) {
     EXPECT_THROW(Membership("", kNodes, TimePoint{}), std::invalid_argument);
 }
 
+TEST(MembershipTest, SortsAndDeduplicatesTheNodeList) {
+    const Membership m("node-b", {"node-c", "node-a", "node-b", "node-a"}, TimePoint{});
+    EXPECT_EQ(m.all_nodes(), (Names{"node-a", "node-b", "node-c"}));
+    EXPECT_EQ(m.view().members, (Names{"node-a", "node-b", "node-c"}));
+    EXPECT_EQ(m.self(), "node-b");
+}
+
 // ---- Failure detection ----
 
 TEST(MembershipTest, ANodeIsAliveWhileWeKeepHearingFromIt) {
