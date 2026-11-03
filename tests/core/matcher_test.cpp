@@ -291,5 +291,11 @@ TEST(MatcherConfigTest, RejectsNonsenseSettings) {
     EXPECT_NO_THROW(Matcher("x", MatchConfig{}));
 }
 
+TEST(MatcherConfigTest, ExposesTheConfigItWasBuiltWith) {
+    const Matcher matcher("x", MatchConfig{.lobby_size = 6, .initial_window = 25});
+    EXPECT_EQ(matcher.config().lobby_size, 6u);
+    EXPECT_EQ(matcher.config().initial_window, 25);
+}
+
 }  // namespace
 }  // namespace matchmesh::core
