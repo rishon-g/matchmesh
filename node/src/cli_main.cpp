@@ -151,7 +151,8 @@ int main(int argc, char** argv) {
     queue.set_region(region);
     queue.set_game_mode(mode);
     queue.set_skill_bracket(matchmesh::core::skill_bracket_for(rating));
-    const std::string queue_name = region + "/" + mode + "/" + std::to_string(queue.skill_bracket());
+    const std::string queue_name =
+        matchmesh::core::to_string(matchmesh::core::make_queue_key(region, mode, rating));
 
     if (command == "enqueue") {
         matchmesh::v1::EnqueueRequest request;
