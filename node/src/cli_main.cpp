@@ -81,8 +81,6 @@ int report_error(const grpc::Status& status) {
     return EXIT_FAILURE;
 }
 
-}  // namespace
-
 // Prints the membership view as the target node sees it.
 int show_topology(const std::string& target) {
     const auto stub = matchmesh::v1::ClusterService::NewStub(
@@ -106,6 +104,8 @@ int show_topology(const std::string& target) {
     }
     return EXIT_SUCCESS;
 }
+
+}  // namespace
 
 int main(int argc, char** argv) {
     const std::vector<std::string> args(argv + 1, argv + argc);
