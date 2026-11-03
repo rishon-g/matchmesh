@@ -35,6 +35,18 @@ TEST(MembershipViewTest, CoordinatorIsTheLowestMember) {
     EXPECT_EQ(MembershipView{}.coordinator(), "");
 }
 
+TEST(MembershipViewTest, IncarnationOfDefaultsToZeroAndListsMatchesIt) {
+    const MembershipView view{2, {"node-a", "node-b"}, {{"node-a", 7}}};
+    EXPECT_EQ(view.incarnation_of("node-a"), 7u);
+    EXPECT_EQ(view.incarnation_of("node-b"), 0u);  // listed without an incarnation
+    EXPECT_EQ(view.incarnation_of("node-z"), 0u);  // not listed at all
+
+    EXPECT_TRUE(view.lists("node-a", 7));
+    EXPECT_FALSE(view.lists("node-a", 8));  // same node, different process
+    EXPECT_TRUE(view.lists("node-b", 0));
+    EXPECT_FALSE(view.lists("node-z", 0));  // not a member
+}
+
 TEST(MembershipViewTest, HigherEpochIsNewer) {
     const MembershipView old_view{3, {"node-a", "node-b"}};
     const MembershipView new_view{4, {"node-b"}};
