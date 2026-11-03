@@ -192,6 +192,13 @@ TEST(MembershipTest, NodesAdoptNewerViewsAndIgnoreOlderOnes) {
     EXPECT_EQ(c.view(), v3);
 }
 
+TEST(MembershipTest, AdoptedViewsAreSortedAndDropZeroIncarnations) {
+    Membership m("node-a", kNodes, TimePoint{});
+    ASSERT_TRUE(m.observe(MembershipView{
+        1, {"node-c", "node-b", "node-c"}, {{"node-b", 0}, {"node-c", 9}}}));
+    EXPECT_EQ(m.view(), (MembershipView{1, {"node-b", "node-c"}, {{"node-c", 9}}}));
+}
+
 TEST(MembershipTest, EmptyViewsAreNeverAdopted) {
     // A bare ping carries epoch 0 and no members. Its empty coordinator would
     // sort before "node-a", so without a guard it would win the tie-break.
