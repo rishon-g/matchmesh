@@ -20,6 +20,15 @@ target_compile_options(matchmesh_warnings INTERFACE
 
 # ---- Sub-projects ----
 add_subdirectory(core)
+add_subdirectory(sim)     # the in-browser demo's simulated cluster
+
+if(EMSCRIPTEN)
+    # The WebAssembly build is only the demo: core, the simulator and its
+    # JavaScript bindings. Nothing that needs gRPC or sockets.
+    add_subdirectory(demo)
+    return()
+endif()
+
 add_subdirectory(proto)   # generated gRPC/Protobuf code
 add_subdirectory(node)
 add_subdirectory(loadgen)

@@ -24,6 +24,12 @@ target_link_libraries(matchmesh_core_tests
 # names the exact test that broke.
 gtest_discover_tests(matchmesh_core_tests)
 
+# ---- The demo's simulated cluster (no networking, so TSan runs it too) ----
+add_executable(matchmesh_sim_tests sim/cluster_test.cpp)
+target_link_libraries(matchmesh_sim_tests
+    PRIVATE matchmesh_sim GTest::gtest_main matchmesh_warnings)
+gtest_discover_tests(matchmesh_sim_tests)
+
 # ---- Load generator: histogram and workload (no networking) ----
 add_executable(matchmesh_loadgen_tests
     loadgen/histogram_test.cpp
