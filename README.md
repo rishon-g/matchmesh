@@ -15,7 +15,7 @@ Recorded against five real node processes.*
 
 ## Results
 
-All measured, not estimated: five node processes and the load generator sharing
+All real measures: five node processes and the load generator sharing
 one 2-core machine.
 
 | What | Measured |
