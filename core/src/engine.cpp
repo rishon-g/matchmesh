@@ -163,6 +163,11 @@ std::size_t MatchmakingEngine::lobbies_formed() const noexcept {
     return lobbies_formed_.load(std::memory_order_relaxed);
 }
 
+std::vector<Lobby> MatchmakingEngine::recent_lobbies() const {
+    const std::scoped_lock lock(recent_mutex_);
+    return {recent_.begin(), recent_.end()};
+}
+
 // ---- Replication: replica side and moving shards ----
 
 std::vector<QueueKey> MatchmakingEngine::shards() const {
@@ -350,9 +355,16 @@ std::size_t MatchmakingEngine::match_shard(Shard& shard, TimePoint now) {
         if (!replicate(shard, change)) {
             break;  // the players stay queued; the next pass tries again
         }
-        const std::scoped_lock lock(shard.mutex);
-        apply_locked(shard, change);
+        {
+            const std::scoped_lock lock(shard.mutex);
+            apply_locked(shard, change);
+        }
         ++formed;
+        const std::scoped_lock recent(recent_mutex_);
+        recent_.push_front(std::get<LobbyFormed>(change.op).lobby);
+        if (recent_.size() > kRecentLobbies) {
+            recent_.pop_back();
+        }
     }
     lobbies_formed_.fetch_add(formed, std::memory_order_relaxed);
     return formed;

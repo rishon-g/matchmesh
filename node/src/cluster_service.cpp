@@ -26,6 +26,9 @@ grpc::Status ClusterServiceImpl::GetTopology(grpc::ServerContext* /*context*/,
                                              const v1::GetTopologyRequest* /*request*/,
                                              v1::GetTopologyResponse* response) {
     manager_.fill_topology(response);
+    if (shards_ != nullptr) {
+        shards_->fill_topology(response);
+    }
     return grpc::Status::OK;
 }
 

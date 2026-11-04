@@ -437,6 +437,32 @@ TEST(ClusterTest, ANodeThatWasDownForAWhileIsReachableSoonAfterRestarting) {
                             << " ms";
 }
 
+TEST(ClusterTest, EachNodeReportsTheQueuesItOwnsAndItsLobbies) {
+    TestCluster cluster(kThree, kFast);
+    ASSERT_TRUE(eventually([&] { return cluster.settled(); }));
+    const std::string region = region_owned_by("node-c");
+    const core::QueueKey queue = core::make_queue_key(region, "ranked", 1300);
+    for (int i = 0; i < 5; ++i) {
+        ASSERT_TRUE(cluster.enqueue_via("node-a", "p" + std::to_string(i), region).ok());
+    }
+    ASSERT_EQ(cluster.engine_of("node-c").run_match_pass(core::Clock::now()), 1u);
+
+    const v1::GetTopologyResponse from_c = cluster.topology_from("node-c");
+    ASSERT_EQ(from_c.shards_size(), 1);
+    EXPECT_EQ(from_c.shards(0).queue().region(), region);
+    EXPECT_EQ(from_c.shards(0).primary_node_id(), "node-c");
+    EXPECT_EQ(from_c.shards(0).backup_node_id(),
+              *cluster.placement_according_to("node-c", queue).backup);
+    EXPECT_EQ(from_c.shards(0).queued_players(), 1u);  // five joined, four matched
+    ASSERT_EQ(from_c.recent_lobbies_size(), 1);
+    EXPECT_EQ(from_c.recent_lobbies(0).players_size(), 4);
+
+    // Its backup holds a copy but doesn't report it: only primaries do, so a
+    // merged picture counts every queue once.
+    const std::string backup = *cluster.placement_according_to("node-c", queue).backup;
+    EXPECT_EQ(cluster.topology_from(backup).shards_size(), 0);
+}
+
 TEST(ClusterTest, TopologyReportsTheAgreedView) {
     TestCluster cluster(kThree, kFast);
     ASSERT_TRUE(eventually([&] { return cluster.settled(); }));

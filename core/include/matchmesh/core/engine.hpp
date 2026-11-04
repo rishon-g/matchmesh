@@ -45,6 +45,7 @@
 #include <condition_variable>
 #include <cstddef>
 #include <cstdint>
+#include <deque>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -157,6 +158,11 @@ public:
     [[nodiscard]] std::size_t queued_players() const;
     [[nodiscard]] std::size_t lobbies_formed() const noexcept;
 
+    // The lobbies this node formed most recently (as primary), newest first,
+    // at most kRecentLobbies of them. For the dashboard's live feed.
+    static constexpr std::size_t kRecentLobbies = 32;
+    [[nodiscard]] std::vector<Lobby> recent_lobbies() const;
+
     // ---- Replication: replica side and moving shards between nodes ----
 
     // Every queue this node holds (as primary or replica).
@@ -240,6 +246,10 @@ private:
     Replicator* const replicator_;  // may be null
     Matcher matcher_;  // safe for concurrent use on different queues
     std::atomic<std::size_t> lobbies_formed_{0};
+    // A leaf lock: taken (briefly) while a shard's locks may be held, but
+    // nothing else is ever locked while holding it.
+    mutable std::mutex recent_mutex_;
+    std::deque<Lobby> recent_;  // newest first
 
     mutable std::shared_mutex shards_mutex_;  // guards the map, not the shards
     // unique_ptr keeps each Shard at a fixed address as the map grows, and

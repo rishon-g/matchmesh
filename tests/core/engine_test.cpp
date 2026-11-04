@@ -140,6 +140,19 @@ TEST_F(EngineTest, CancelInAnUnknownQueueDoesNothing) {
               CancelResult::kNotWaiting);
 }
 
+TEST_F(EngineTest, RecentLobbiesAreNewestFirstAndBounded) {
+    EXPECT_TRUE(engine_.recent_lobbies().empty());
+    for (int round = 0; round < 40; ++round) {
+        // Four fresh players per round, in a bracket of their own.
+        enqueue_four(100 * round + 3);
+        ASSERT_EQ(engine_.run_match_pass(now_), 1u) << round;
+    }
+    const auto recent = engine_.recent_lobbies();
+    ASSERT_EQ(recent.size(), MatchmakingEngine::kRecentLobbies);
+    EXPECT_EQ(recent.front().players.front().id, "p3903");  // the last round's lobby
+    EXPECT_EQ(recent.back().players.front().id, "p" + std::to_string(100 * 8 + 3));
+}
+
 TEST_F(EngineTest, CannotCancelAfterBeingMatched) {
     enqueue_four(1200);
     ASSERT_EQ(engine_.run_match_pass(now_), 1u);

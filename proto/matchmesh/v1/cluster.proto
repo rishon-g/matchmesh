@@ -150,12 +150,13 @@ message ShardAssignment {
   uint32 queued_players = 4;
 }
 
-// shards and recent_lobbies are filled in with the dashboard (Phase 7); for
-// now GetTopology reports the membership view and each node's status.
+// The cluster as one node sees it. The membership part (epoch, coordinator,
+// nodes) is the same on every node once views agree; shards and lobbies are
+// only this node's own, so the gateway asks every node and merges them.
 message GetTopologyResponse {
   uint64 epoch = 1;
   string coordinator_node_id = 2;  // the alive node with the lowest ID
   repeated NodeStatus nodes = 3;
-  repeated ShardAssignment shards = 4;
-  repeated Lobby recent_lobbies = 5;  // feed for the dashboard
+  repeated ShardAssignment shards = 4;  // queues this node is primary for
+  repeated Lobby recent_lobbies = 5;    // formed here most recently, newest first
 }

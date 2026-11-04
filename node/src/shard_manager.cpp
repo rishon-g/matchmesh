@@ -172,6 +172,27 @@ void ShardManager::handle(const v1::ReplicateRequest& request, v1::ReplicateResp
     accept();
 }
 
+// ---- Reporting ----
+
+void ShardManager::fill_topology(v1::GetTopologyResponse* response) const {
+    const std::string& self = router_.self_id();
+    for (const core::QueueKey& queue : engine_.shards()) {
+        const auto info = engine_.shard_info(queue);
+        const Placement place = router_.placement(queue);
+        if (!info || info->role != core::ShardRole::kPrimary || place.primary != self) {
+            continue;  // a replica, or on its way to another node
+        }
+        v1::ShardAssignment* shard = response->add_shards();
+        to_proto(queue, shard->mutable_queue());
+        shard->set_primary_node_id(self);
+        shard->set_backup_node_id(place.backup.value_or(""));
+        shard->set_queued_players(static_cast<std::uint32_t>(info->queued));
+    }
+    for (const core::Lobby& lobby : engine_.recent_lobbies()) {
+        to_proto(lobby, response->add_recent_lobbies());
+    }
+}
+
 // ---- Handing over and taking over ----
 
 void ShardManager::loop(std::stop_token stop) {

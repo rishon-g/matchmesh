@@ -138,4 +138,21 @@ std::vector<std::string> HashRing::owners(const QueueKey& key, std::size_t count
     return owners(to_string(key), count);
 }
 
+std::vector<HashRing::Point> HashRing::points() const {
+    std::vector<Point> out;
+    out.reserve(ring_.size());
+    for (const auto& [position, node] : ring_) {
+        out.push_back(Point{position, node});
+    }
+    return out;
+}
+
+std::uint64_t HashRing::position(std::string_view key) noexcept {
+    return stable_hash(key);
+}
+
+std::uint64_t HashRing::position(const QueueKey& key) {
+    return position(to_string(key));
+}
+
 }  // namespace matchmesh::core

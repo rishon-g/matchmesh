@@ -3,7 +3,7 @@
 A fault-tolerant distributed matchmaking cluster: five C++20 nodes, gRPC,
 consistent hashing, primary-backup replication and chaos testing.
 
-> Work in progress — currently at Phase 6 (load generation and chaos testing).
+> Work in progress — currently at Phase 7 (gateway, dashboard and documentation).
 
 ## Quick start (development container)
 
@@ -42,9 +42,10 @@ ctest --preset debug --rerun-failed        # only what failed last time
 | `proto/` | gRPC service contracts; C++ is generated from them at build time |
 | `node/` | The node server (`matchmesh_node`) and the `matchmesh_cli` client |
 | `loadgen/` | The load generator (`matchmesh_loadgen`) and the invariant checker |
-| `tests/` | GoogleTest suites: `core/`, `loadgen/`, `node/` (real in-process nodes) and `stress/` |
+| `gateway/` | The WebSocket gateway (`matchmesh_gateway`): polls every node, pushes JSON to browsers |
+| `dashboard/` | The Angular dashboard: the hash ring, node health and lobbies, live |
+| `tests/` | GoogleTest suites: `core/`, `loadgen/`, `node/` (real in-process nodes), `gateway/` and `stress/` |
 | `scripts/` | Smoke test, cluster demo and chaos test |
-| `gateway/`, `dashboard/` | Placeholders for upcoming phases |
 
 ## Matchmaking engine (`core/`)
 
@@ -242,7 +243,7 @@ lost its majority stops accepting changes until enough nodes return.
 ## Five-node cluster
 
 ```bash
-docker compose up -d --build     # build the slim runtime image and start node-a .. node-e
+docker compose up -d --build     # build the images; start node-a .. node-e, gateway, dashboard
 ./scripts/cluster_demo.sh        # every player joins via node-a; watch where they land
 docker compose exec node-a matchmesh_cli --target node-c:50051 enqueue alice 1300 us-west ranked
 docker compose down
@@ -264,6 +265,40 @@ docker compose logs node-b                     # each epoch and hand-over as it 
 
 (`us-4` is from `cluster_demo.sh`; which node owns its queue depends on the ring,
 so kill whichever node the first command says served it.)
+
+## Dashboard
+
+```bash
+docker compose up -d --build     # nodes, gateway and dashboard
+open http://localhost:8080       # the live dashboard
+docker compose run --rm loadgen  # give it something to show
+docker compose kill node-c       # and watch the ring rebalance
+```
+
+The dashboard draws the **real hash ring**: a band coloured by which node owns
+each stretch (every node holds 100 places round it), and every queue as a dot
+at the position its name hashes to, filled with its primary's colour and ringed
+with its backup's. Beside it are each node's health and load, and the lobbies
+forming right now. Kill a node and, within about 0.5 s, it shows as unreachable;
+about a second later the epoch ticks over, its stretches vanish from the ring,
+and its queues take on the colour of the backups that took them over.
+
+Two pieces make it work, because browsers can't call gRPC:
+
+- **The gateway** ([`gateway/`](gateway)), a small C++ server built on the
+  header-only [Crow](https://crowcpp.org) framework. Twice a second it asks
+  every node for `GetTopology` (all at once, each with a 300 ms deadline, so a
+  dead node costs one timeout rather than delaying the others), merges the
+  answers, and pushes the result as JSON to every connected browser over a
+  WebSocket at `/ws`, but only when something changed. Each node reports the
+  shared membership view plus only its own queues and lobbies, so the merge is
+  what turns five partial views into one picture. `GET /api/topology` returns
+  the same JSON once.
+- **The dashboard** ([`dashboard/`](dashboard)), an Angular 22 app (standalone
+  components, signals, zoneless) that subscribes with RxJS's `webSocket`,
+  reconnects by itself with backoff, and draws the ring as SVG. In Compose it's
+  served by nginx, which forwards `/ws` and `/api` to the gateway. For
+  development, `npm start` in `dashboard/` proxies to a gateway on port 8081.
 
 ## Load testing
 

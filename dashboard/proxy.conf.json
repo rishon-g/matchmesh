@@ -1,0 +1,4 @@
+{
+  "/ws": { "target": "http://localhost:8081", "ws": true },
+  "/api": { "target": "http://localhost:8081" }
+}

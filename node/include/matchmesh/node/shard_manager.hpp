@@ -87,6 +87,10 @@ public:
     // ClusterService.Replicate.
     void handle(const v1::ReplicateRequest& request, v1::ReplicateResponse* response);
 
+    // ClusterService.GetTopology: adds the queues this node is primary for
+    // (with their backups and sizes) and the lobbies it formed most recently.
+    void fill_topology(v1::GetTopologyResponse* response) const;
+
     // The router says this node owns `queue`. Nothing if a client request
     // for it may be served here right now; otherwise the retryable status to
     // answer with. Promotes a waiting copy once the hand-over is finished.

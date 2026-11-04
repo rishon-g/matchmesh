@@ -295,5 +295,26 @@ TEST(HashRingDistributionTest, ModuloHashingWouldMoveAlmostEverything) {
     EXPECT_GT(static_cast<double>(moved) / kKeys, 0.7);
 }
 
+TEST(HashRingTest, PointsListTheWholeRingInClockwiseOrder) {
+    HashRing ring;
+    ring.add_node("node-a");
+    ring.add_node("node-b");
+    const auto points = ring.points();
+    EXPECT_EQ(points.size(), 2 * HashRing::kDefaultVirtualNodes);  // no collisions in practice
+    EXPECT_TRUE(std::ranges::is_sorted(points, {}, &HashRing::Point::position));
+
+    // The owner of any key is the first point at or after its position,
+    // wrapping round to the start: exactly what the dashboard draws.
+    for (int i = 0; i < 200; ++i) {
+        const std::string key = "queue-" + std::to_string(i);
+        const std::uint64_t at = HashRing::position(key);
+        const auto next = std::ranges::lower_bound(points, at, {}, &HashRing::Point::position);
+        const std::string& expected = next == points.end() ? points.front().node : next->node;
+        EXPECT_EQ(ring.owner(key), expected) << key;
+    }
+    EXPECT_EQ(HashRing::position(make_queue_key("eu", "ranked", 1300)),
+              HashRing::position(to_string(make_queue_key("eu", "ranked", 1300))));
+}
+
 }  // namespace
 }  // namespace matchmesh::core

@@ -1,0 +1,36 @@
+<header>
+  <h1>MatchMesh</h1>
+  <p class="connection" [class.live]="stream.state() === 'live'">{{ connection() }}</p>
+  @if (snapshot(); as s) {
+    <p class="facts">
+      <span><b>{{ serving() }}</b> of {{ s.nodes.length }} nodes serving</span>
+      <span><b>{{ s.shards.length }}</b> queues</span>
+      <span><b>{{ s.queued_players }}</b> players waiting</span>
+    </p>
+  }
+</header>
+
+@if (snapshot(); as s) {
+  <main>
+    <section class="ring" aria-label="Hash ring">
+      <mm-ring-chart [snapshot]="s" />
+      <p class="caption">
+        Each node holds 100 places round the ring, and every queue belongs to the next place
+        clockwise from where its name hashes. Dots are queues, filled with the node that runs them
+        and ringed with the node that keeps their backup. When a node goes down its stretches
+        disappear and its queues take on their backup's colour.
+      </p>
+    </section>
+    <aside>
+      <mm-node-list [nodes]="s.nodes" />
+      <mm-lobby-feed [lobbies]="s.lobbies" [nodeIds]="nodeIds()" />
+    </aside>
+  </main>
+} @else {
+  <main class="waiting">
+    <p>
+      Waiting for the first update from the gateway. Start everything with
+      <code>docker compose up</code>, then open this page again.
+    </p>
+  </main>
+}

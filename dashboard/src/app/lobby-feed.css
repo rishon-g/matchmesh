@@ -1,0 +1,62 @@
+ol {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+li {
+  padding: 0.6rem 0;
+  animation: arrive 500ms ease-out;
+}
+li + li {
+  border-top: 1px solid var(--rule);
+}
+p {
+  margin: 0;
+}
+.meta {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+.queue {
+  font-weight: 600;
+}
+.when {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 0.8125rem;
+  font-variant-numeric: tabular-nums;
+}
+.swatch {
+  width: 0.6rem;
+  height: 0.6rem;
+  border-radius: 50%;
+  flex: none;
+}
+.players {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1rem;
+  margin-top: 0.3rem;
+  padding-left: 1.15rem;
+  color: var(--muted);
+  font-size: 0.875rem;
+  font-variant-numeric: tabular-nums;
+}
+.player b {
+  color: var(--ink);
+  font-weight: 550;
+}
+.empty {
+  color: var(--muted);
+}
+@keyframes arrive {
+  from {
+    background: var(--fresh);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  li {
+    animation: none;
+  }
+}

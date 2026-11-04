@@ -49,6 +49,14 @@ if(NOT CMAKE_CXX_FLAGS MATCHES "-fsanitize=thread")
         PRIVATE matchmesh_node_lib matchmesh_loadgen_runner GTest::gtest_main
                 matchmesh_warnings)
     gtest_discover_tests(matchmesh_node_tests)
+
+    # The gateway: merging snapshots, and polling real (in-process) servers.
+    add_executable(matchmesh_gateway_tests
+        gateway/snapshot_test.cpp
+        gateway/poller_test.cpp)
+    target_link_libraries(matchmesh_gateway_tests
+        PRIVATE matchmesh_gateway_lib GTest::gtest_main matchmesh_warnings)
+    gtest_discover_tests(matchmesh_gateway_tests)
 endif()
 
 # ---- Stress tests (many threads at once; meant for the tsan preset) ----

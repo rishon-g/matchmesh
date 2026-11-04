@@ -3,6 +3,7 @@
 #   docker compose up -d --build        start it (first build takes a few minutes)
 #   ./scripts/cluster_demo.sh           watch requests get forwarded
 #   docker compose logs -f node-a       follow one node's log
+#   open http://localhost:8080          the live dashboard (gateway + Angular app)
 #   docker compose run --rm loadgen     10,000 simulated players (see README)
 #   docker compose down                 stop and remove everything
 #
@@ -51,6 +52,30 @@ services:
     <<: *node
     environment: { <<: *env, MATCHMESH_NODE_ID: node-e }
     ports: ["50055:50051"]
+
+  # Polls every node's GetTopology and pushes one merged picture of the
+  # cluster to browsers over a WebSocket (browsers can't call gRPC).
+  gateway:
+    image: matchmesh-node
+    build:
+      context: .
+      target: runtime
+    entrypoint: ["matchmesh_gateway"]
+    environment:
+      MATCHMESH_PEERS: node-a=node-a:50051,node-b=node-b:50051,node-c=node-c:50051,node-d=node-d:50051,node-e=node-e:50051
+      MATCHMESH_GATEWAY_LISTEN: 0.0.0.0:8081
+    ports: ["8081:8081"]
+    init: true
+    restart: unless-stopped
+
+  # The Angular dashboard, served by nginx, which also forwards /ws and /api
+  # to the gateway so the browser only ever talks to one address.
+  dashboard:
+    build: ./dashboard
+    image: matchmesh-dashboard
+    ports: ["8080:80"]
+    depends_on: [gateway]
+    restart: unless-stopped
 
   # The load generator. Not started by `up` (it's in the "tools" profile);
   # run it on demand once the cluster is up:

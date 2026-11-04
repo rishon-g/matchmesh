@@ -71,6 +71,18 @@ public:
     [[nodiscard]] std::vector<std::string> owners(std::string_view key, std::size_t count) const;
     [[nodiscard]] std::vector<std::string> owners(const QueueKey& key, std::size_t count) const;
 
+    // Every point on the ring and the node it belongs to, in clockwise order
+    // (smallest position first). For drawing the ring.
+    struct Point {
+        std::uint64_t position = 0;
+        std::string node;
+    };
+    [[nodiscard]] std::vector<Point> points() const;
+
+    // Where a key sits on the ring; its owner is the first point at or after it.
+    [[nodiscard]] static std::uint64_t position(std::string_view key) noexcept;
+    [[nodiscard]] static std::uint64_t position(const QueueKey& key);
+
 private:
     // Puts one node's virtual nodes on the ring.
     void place(const std::string& node_id);

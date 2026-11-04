@@ -1,0 +1,44 @@
+@import '@fontsource-variable/instrument-sans/wdth.css';
+
+:root {
+  --paper: #e9eef2; /* cool, pale grey-blue page */
+  --panel: #f6f8fa;
+  --ink: #1b2a41; /* navy ink */
+  --muted: #5b6b80;
+  --rule: #c9d3dd;
+  --down: #c2412d; /* only ever means "not serving" */
+  --live: #009e73;
+  --fresh: #fbf3d2; /* a new lobby's brief highlight */
+  color-scheme: light;
+}
+
+html {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: 'Instrument Sans Variable', 'Helvetica Neue', Arial, sans-serif;
+  font-size: 100%;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  margin: 0;
+}
+
+h2 {
+  margin: 0 0 0.6rem;
+  font-size: 1.125rem;
+  font-weight: 650;
+  font-stretch: 85%;
+}
+
+code {
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 0.9em;
+  color: var(--ink);
+}
+
+:focus-visible {
+  outline: 3px solid #0072b2;
+  outline-offset: 2px;
+}

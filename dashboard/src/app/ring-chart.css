@@ -1,0 +1,49 @@
+:host {
+  display: block;
+}
+svg {
+  display: block;
+  width: 100%;
+  max-width: 34rem;
+  height: auto;
+  margin-inline: auto;
+  overflow: visible;
+}
+.track {
+  fill: none;
+  stroke: var(--rule);
+  stroke-width: 22;
+}
+path {
+  stroke-width: 0.6; /* closes hairline seams between neighbouring stretches */
+  transition: fill 600ms ease, stroke 600ms ease;
+}
+.queue {
+  stroke-width: 2.5;
+  transition: fill 600ms ease, stroke 600ms ease, r 400ms ease;
+}
+text {
+  fill: var(--ink);
+  text-anchor: middle;
+}
+.epoch-label {
+  font-size: 15px;
+  fill: var(--muted);
+}
+.epoch {
+  font-size: 84px;
+  font-weight: 650;
+  font-stretch: 75%;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+.coordinator {
+  font-size: 13px;
+  fill: var(--muted);
+}
+@media (prefers-reduced-motion: reduce) {
+  path,
+  .queue {
+    transition: none;
+  }
+}

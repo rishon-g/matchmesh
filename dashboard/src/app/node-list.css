@@ -1,0 +1,40 @@
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+th,
+td {
+  padding: 0.45rem 0;
+  text-align: left;
+  font-weight: 450;
+}
+thead th {
+  color: var(--muted);
+  font-size: 0.8125rem;
+  padding-bottom: 0.6rem;
+}
+tbody tr + tr {
+  border-top: 1px solid var(--rule);
+}
+tbody th {
+  font-weight: 600;
+}
+.number {
+  text-align: right;
+}
+.swatch {
+  display: inline-block;
+  width: 0.7rem;
+  height: 0.7rem;
+  margin-right: 0.55rem;
+  border-radius: 50%;
+  vertical-align: -0.05rem;
+}
+.down td:nth-child(2) {
+  color: var(--down);
+  font-weight: 600;
+}
+.down .swatch {
+  opacity: 0.35;
+}
