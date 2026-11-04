@@ -42,7 +42,13 @@ export class NodeList {
     return this.nodes().map((node) => ({
       ...node,
       colour: colourFor(ids, node.id),
-      state: !node.reachable ? 'Unreachable' : node.member ? 'Serving' : 'Rejoining',
+      state: !node.reachable
+        ? 'Unreachable'
+        : node.member
+          ? 'Serving'
+          : node.side
+            ? 'Split off' // demo: serving its own half of a split network
+            : 'Rejoining',
     }));
   });
 }

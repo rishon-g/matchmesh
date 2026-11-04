@@ -3,9 +3,8 @@ import { toSignal } from '@angular/core/rxjs-interop';
 import { defer, repeat, retry, timer } from 'rxjs';
 import { webSocket } from 'rxjs/webSocket';
 
+import { ClusterFeed, ConnectionState } from './cluster-feed';
 import { Snapshot } from './topology';
-
-export type ConnectionState = 'connecting' | 'live' | 'reconnecting';
 
 /** Where the gateway's WebSocket is: the page's own host, at /ws (nginx or the dev server proxies it). */
 export const GATEWAY_SOCKET_URL = new InjectionToken<string>('GATEWAY_SOCKET_URL', {
@@ -24,12 +23,12 @@ export function reconnectDelay(attempt: number): number {
  * gateway restarts or the connection drops.
  */
 @Injectable({ providedIn: 'root' })
-export class TopologyStream {
+export class TopologyStream extends ClusterFeed {
   private readonly url = inject(GATEWAY_SOCKET_URL);
 
-  readonly state = signal<ConnectionState>('connecting');
+  override readonly state = signal<ConnectionState>('connecting');
 
-  readonly snapshot = toSignal(
+  override readonly snapshot = toSignal<Snapshot | null>(
     defer(() =>
       webSocket<Snapshot>({
         url: this.url,

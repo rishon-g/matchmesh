@@ -4,7 +4,8 @@ import { TestBed } from '@angular/core/testing';
 import { App } from './app';
 import { ago, FEED_LENGTH } from './lobby-feed';
 import { Snapshot } from './topology';
-import { ConnectionState, reconnectDelay, TopologyStream } from './topology-stream';
+import { ClusterFeed, ConnectionState } from './cluster-feed';
+import { reconnectDelay } from './topology-stream';
 
 const snapshot: Snapshot = {
   epoch: 4,
@@ -21,7 +22,16 @@ const snapshot: Snapshot = {
     { node: 'node-b', at: 0.75 },
   ],
   shards: [
-    { queue: 'eu/ranked/2', region: 'eu', mode: 'ranked', bracket: 2, primary: 'node-a', backup: 'node-b', queued: 9, at: 0.1 },
+    {
+      queue: 'eu/ranked/2',
+      region: 'eu',
+      mode: 'ranked',
+      bracket: 2,
+      primary: 'node-a',
+      backup: 'node-b',
+      queued: 9,
+      at: 0.1,
+    },
   ],
   lobbies: Array.from({ length: 15 }, (_, i) => ({
     id: `L${i}`,
@@ -35,7 +45,9 @@ const snapshot: Snapshot = {
 function render(state: ConnectionState, value: Snapshot | null) {
   TestBed.configureTestingModule({
     imports: [App],
-    providers: [{ provide: TopologyStream, useValue: { state: signal(state), snapshot: signal(value) } }],
+    providers: [
+      { provide: ClusterFeed, useValue: { state: signal(state), snapshot: signal(value) } },
+    ],
   });
   const fixture = TestBed.createComponent(App);
   fixture.detectChanges();
@@ -53,9 +65,9 @@ describe('App', () => {
   });
 
   it('says which nodes are not serving and why', () => {
-    const states = [...render('live', snapshot).querySelectorAll('mm-node-list tbody td:nth-child(2)')].map(
-      (cell) => cell.textContent?.trim(),
-    );
+    const states = [
+      ...render('live', snapshot).querySelectorAll('mm-node-list tbody td:nth-child(2)'),
+    ].map((cell) => cell.textContent?.trim());
     expect(states).toEqual(['Serving', 'Rejoining', 'Unreachable']);
   });
 

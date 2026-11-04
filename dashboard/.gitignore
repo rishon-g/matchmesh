@@ -42,3 +42,6 @@ __screenshots__/
 # System files
 .DS_Store
 Thumbs.db
+
+# The WebAssembly simulator, copied in from build/wasm/demo for the demo build
+/public/sim/

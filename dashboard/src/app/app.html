@@ -1,16 +1,28 @@
 <header>
   <h1>MatchMesh</h1>
-  <p class="connection" [class.live]="stream.state() === 'live'">{{ connection() }}</p>
+  @if (demo) {
+    <a class="source" href="https://github.com/rishon-g/matchmesh">Source and README on GitHub</a>
+  }
+  <p class="connection" [class.live]="live()">{{ connection() }}</p>
   @if (snapshot(); as s) {
     <p class="facts">
-      <span><b>{{ serving() }}</b> of {{ s.nodes.length }} nodes serving</span>
-      <span><b>{{ s.shards.length }}</b> queues</span>
-      <span><b>{{ s.queued_players }}</b> players waiting</span>
+      <span
+        ><b>{{ serving() }}</b> of {{ s.nodes.length }} nodes serving</span
+      >
+      <span
+        ><b>{{ s.shards.length }}</b> queues</span
+      >
+      <span
+        ><b>{{ s.queued_players }}</b> players waiting</span
+      >
     </p>
   }
 </header>
 
 @if (snapshot(); as s) {
+  @if (demo) {
+    <mm-demo-panel [snapshot]="s" />
+  }
   <main>
     <section class="ring" aria-label="Hash ring">
       <mm-ring-chart [snapshot]="s" />
@@ -23,8 +35,24 @@
     </section>
     <aside>
       <mm-node-list [nodes]="s.nodes" />
-      <mm-lobby-feed [lobbies]="s.lobbies" [nodeIds]="nodeIds()" />
+      <mm-lobby-feed
+        [lobbies]="s.lobbies"
+        [nodeIds]="nodeIds()"
+        [clock]="s.sim?.now ?? null"
+        [hint]="s.sim ? 'No lobbies yet: four players of similar rating are needed for one.' : null"
+      />
     </aside>
+  </main>
+} @else if (demo && stream.state() === 'failed') {
+  <main class="waiting">
+    <p>
+      The simulated cluster couldn't start in this browser (it needs WebAssembly). The
+      <a href="https://github.com/rishon-g/matchmesh">source and README</a> show the real thing.
+    </p>
+  </main>
+} @else if (demo) {
+  <main class="waiting">
+    <p>Starting five simulated nodes…</p>
   </main>
 } @else {
   <main class="waiting">

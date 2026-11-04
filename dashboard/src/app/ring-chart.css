@@ -16,11 +16,21 @@ svg {
 }
 path {
   stroke-width: 0.6; /* closes hairline seams between neighbouring stretches */
-  transition: fill 600ms ease, stroke 600ms ease;
+  transition:
+    fill 600ms ease,
+    stroke 600ms ease;
 }
 .queue {
   stroke-width: 2.5;
-  transition: fill 600ms ease, stroke 600ms ease, r 400ms ease;
+  transition:
+    fill 600ms ease,
+    stroke 600ms ease,
+    r 400ms ease;
+}
+/* Demo: served on both sides of a network split. */
+.queue.contested {
+  stroke: var(--down);
+  stroke-dasharray: 3 2;
 }
 text {
   fill: var(--ink);

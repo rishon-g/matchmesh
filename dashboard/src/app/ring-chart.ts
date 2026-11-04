@@ -25,6 +25,7 @@ const DOTS = 136; // queues sit just inside the band
       @for (dot of dots(); track dot.queue) {
         <circle
           class="queue"
+          [class.contested]="dot.contested"
           [attr.cx]="dot.x"
           [attr.cy]="dot.y"
           [attr.r]="dot.r"
@@ -36,7 +37,9 @@ const DOTS = 136; // queues sit just inside the band
       }
       <text class="epoch-label" y="-48">epoch</text>
       <text class="epoch" y="26">{{ snapshot().epoch }}</text>
-      <text class="coordinator" y="56">coordinated by {{ snapshot().coordinator || 'nobody' }}</text>
+      <text class="coordinator" y="56">
+        coordinated by {{ snapshot().coordinator || 'nobody' }}
+      </text>
     </svg>
   `,
   styleUrl: './ring-chart.css',
@@ -65,9 +68,11 @@ export class RingChart {
         r: dotRadius(shard.queued, most).toFixed(2),
         fill: colourFor(this.nodeIds(), shard.primary),
         stroke: shard.backup ? colourFor(this.nodeIds(), shard.backup) : 'none',
+        contested: shard.contested ?? false,
         label:
           `${shard.queue}: ${shard.queued} waiting, on ${shard.primary}` +
-          (shard.backup ? `, copied to ${shard.backup}` : ''),
+          (shard.backup ? `, copied to ${shard.backup}` : '') +
+          (shard.contested ? ' (also served by the other side of the split)' : ''),
       };
     });
   });

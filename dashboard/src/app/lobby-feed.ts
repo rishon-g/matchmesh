@@ -28,8 +28,12 @@ export const FEED_LENGTH = 10;
     <h2>Lobbies forming</h2>
     @if (rows().length === 0) {
       <p class="empty">
-        No lobbies yet. Send players in with the load generator:
-        <code>docker compose run --rm loadgen</code>
+        @if (hint(); as text) {
+          {{ text }}
+        } @else {
+          No lobbies yet. Send players in with the load generator:
+          <code>docker compose run --rm loadgen</code>
+        }
       </p>
     } @else {
       <ol>
@@ -42,7 +46,9 @@ export const FEED_LENGTH = 10;
             </p>
             <p class="players">
               @for (player of lobby.players; track player.id) {
-                <span class="player">{{ player.id }} <b>{{ player.rating }}</b></span>
+                <span class="player"
+                  >{{ player.id }} <b>{{ player.rating }}</b></span
+                >
               }
             </p>
           </li>
@@ -55,17 +61,23 @@ export const FEED_LENGTH = 10;
 export class LobbyFeed {
   readonly lobbies = input.required<Lobby[]>();
   readonly nodeIds = input.required<string[]>();
+  /** The clock lobbies are stamped with, if not the wall clock (the demo's simulated one). */
+  readonly clock = input<number | null>(null);
+  /** Replaces the load-generator hint shown before any lobby has formed. */
+  readonly hint = input<string | null>(null);
 
   // Ticks once a second so "12 s ago" stays true.
-  private readonly now = toSignal(interval(1000).pipe(map(() => Date.now())), {
+  private readonly wallClock = toSignal(interval(1000).pipe(map(() => Date.now())), {
     initialValue: Date.now(),
   });
 
   protected readonly rows = computed(() =>
-    this.lobbies().slice(0, FEED_LENGTH).map((lobby) => ({
-      ...lobby,
-      colour: colourFor(this.nodeIds(), lobby.node),
-      when: ago(lobby.formed_at, this.now()),
-    })),
+    this.lobbies()
+      .slice(0, FEED_LENGTH)
+      .map((lobby) => ({
+        ...lobby,
+        colour: colourFor(this.nodeIds(), lobby.node),
+        when: ago(lobby.formed_at, this.clock() ?? this.wallClock()),
+      })),
   );
 }

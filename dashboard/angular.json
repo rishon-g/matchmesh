@@ -48,6 +48,16 @@
               "optimization": false,
               "extractLicenses": false,
               "sourceMap": true
+            },
+            "demo": {
+              "fileReplacements": [
+                {
+                  "replace": "src/environments/environment.ts",
+                  "with": "src/environments/environment.demo.ts"
+                }
+              ],
+              "baseHref": "/matchmesh/",
+              "outputPath": "dist/demo"
             }
           },
           "defaultConfiguration": "production"
@@ -60,6 +70,9 @@
             },
             "development": {
               "buildTarget": "dashboard:build:development"
+            },
+            "demo": {
+              "buildTarget": "dashboard:build:demo"
             }
           },
           "defaultConfiguration": "development",

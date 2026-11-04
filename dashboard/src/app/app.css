@@ -35,6 +35,11 @@ h1 {
   border-radius: 50%;
   background: var(--live);
 }
+.source {
+  color: var(--ink);
+  font-weight: 550;
+  text-underline-offset: 0.2em;
+}
 .facts {
   display: flex;
   flex-wrap: wrap;
