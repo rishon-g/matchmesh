@@ -138,12 +138,7 @@ bool Router::apply_view(const core::MembershipView& view) {
 
 Placement Router::placement(const core::QueueKey& queue) const {
     const auto current = table();
-    std::vector<std::string> owners = current->ring.owners(queue, 2);
-    Placement placement{std::move(owners.front()), std::nullopt, current->view.epoch};
-    if (owners.size() > 1) {
-        placement.backup = std::move(owners[1]);
-    }
-    return placement;
+    return core::place(current->ring, current->view.epoch, queue);
 }
 
 std::uint64_t Router::epoch() const {

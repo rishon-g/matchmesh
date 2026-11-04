@@ -2,8 +2,9 @@
 
 // ShardManager: keeps each queue's data on the nodes the ring says should
 // hold it, as membership changes. Primary-backup replication itself happens
-// in the engine (through ReplicationClient); this class handles everything
-// around it:
+// in the engine (through ReplicationClient). The decisions below live in
+// core::ShardCoordinator, shared with the in-browser simulator; this class
+// runs them on a background thread and speaks gRPC for them:
 //
 //   * Receiving. ClusterService.Replicate lands here: a change from a
 //     queue's primary is applied to this node's replica, strictly in order;
@@ -28,10 +29,8 @@
 
 #include <chrono>
 #include <condition_variable>
-#include <cstddef>
 #include <cstdint>
 #include <functional>
-#include <map>
 #include <mutex>
 #include <optional>
 #include <stop_token>
@@ -42,6 +41,7 @@
 
 #include "matchmesh/core/engine.hpp"
 #include "matchmesh/core/membership.hpp"
+#include "matchmesh/core/shard_coordinator.hpp"
 #include "matchmesh/core/types.hpp"
 #include "matchmesh/node/replication_client.hpp"
 #include "matchmesh/node/router.hpp"
@@ -102,26 +102,13 @@ public:
 
 private:
     void loop(std::stop_token stop);
-    // Hands every queue this node no longer owns to its owner, counting the
-    // copies sent in `sent`. True if all of them were accepted and the view
-    // is still `view`; otherwise the next pass tries again.
-    bool hand_over_all(const core::MembershipView& view, std::size_t& sent);
-    // Once settled, starts serving every copy this node now owns.
-    void promote_ready(const core::MembershipView& view);
-    // Makes sure every queue this node owns has an up-to-date backup.
-    void sync_backups();
     void log(const std::string& message) const;
 
     core::MatchmakingEngine& engine_;
     const Router& router_;
-    ReplicationClient& replication_;
-    const std::uint64_t incarnation_;
     const ShardManagerConfig config_;
+    core::ShardCoordinator coordinator_;
     std::function<void()> on_synced_;
-
-    mutable std::mutex mutex_;  // guards progress_ and synced_epoch_
-    std::map<std::string, std::uint64_t> progress_;  // peer -> its synced epoch
-    std::optional<std::uint64_t> synced_epoch_;
 
     // Wakes the background thread early on a view change.
     std::mutex wake_mutex_;

@@ -27,6 +27,7 @@
 
 #include "matchmesh/core/hash_ring.hpp"
 #include "matchmesh/core/membership.hpp"
+#include "matchmesh/core/placement.hpp"
 #include "matchmesh/core/types.hpp"
 #include "matchmesh/v1/matchmaking.grpc.pb.h"
 
@@ -54,15 +55,10 @@ struct RouteDecision {
     std::uint64_t epoch = 0;
 };
 
-// Where a queue lives under one view: its primary (the owner) and its backup,
-// the next distinct node clockwise on the ring (none in a one-node cluster).
-struct Placement {
-    std::string primary;
-    std::optional<std::string> backup;
-    std::uint64_t epoch = 0;
-};
+// Where a queue lives under one view (see core::Placement).
+using Placement = core::Placement;
 
-class Router {
+class Router final : public core::PlacementSource {
 public:
     // `peers` maps node ID -> host:port for every *other* node that may join
     // (an entry for this node itself is ignored, so every node can be given
@@ -71,14 +67,14 @@ public:
     Router(std::string self_id, const std::map<std::string, std::string>& peers,
            std::chrono::milliseconds forward_timeout = std::chrono::seconds(2));
 
-    [[nodiscard]] const std::string& self_id() const noexcept;
+    [[nodiscard]] const std::string& self_id() const noexcept override;
 
     // The node that owns this queue under the current view. Never empty.
     [[nodiscard]] RouteDecision route(const core::QueueKey& queue) const;
     [[nodiscard]] std::string owner_of(const core::QueueKey& queue) const;
     [[nodiscard]] bool is_local(const core::QueueKey& queue) const;
     // Primary and backup together, from one consistent view.
-    [[nodiscard]] Placement placement(const core::QueueKey& queue) const;
+    [[nodiscard]] Placement placement(const core::QueueKey& queue) const override;
 
     // Switches to `view` if it is newer than the current one. Members this
     // node has never heard of are skipped (they have no address). Returns
@@ -86,7 +82,7 @@ public:
     bool apply_view(const core::MembershipView& view);
 
     [[nodiscard]] std::uint64_t epoch() const;
-    [[nodiscard]] core::MembershipView view() const;  // the view routing follows
+    [[nodiscard]] core::MembershipView view() const override;  // the view routing follows
     [[nodiscard]] std::vector<std::string> members() const;  // current ring's nodes, sorted
 
     // Client stub for another node. Throws std::out_of_range for an unknown ID.

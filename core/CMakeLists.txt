@@ -6,7 +6,9 @@ add_library(matchmesh_core
     src/matcher.cpp
     src/engine.cpp
     src/hash_ring.cpp
-    src/membership.cpp)
+    src/membership.cpp
+    src/placement.cpp
+    src/shard_coordinator.cpp)
 
 # PUBLIC: anyone who links matchmesh_core can also #include its headers.
 target_include_directories(matchmesh_core PUBLIC include)

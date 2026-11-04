@@ -11,6 +11,7 @@ add_executable(matchmesh_core_tests
     core/matcher_test.cpp
     core/engine_test.cpp
     core/replication_test.cpp
+    core/shard_coordinator_test.cpp
     core/hash_ring_test.cpp
     core/membership_test.cpp
     core/version_test.cpp)
