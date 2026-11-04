@@ -6,6 +6,10 @@ before answering, notice a dead node within 1.5 seconds, and fail its queues
 over without losing a single player. A live dashboard shows the hash ring
 rebalancing as it happens.
 
+**[▶ Try the live demo](https://rishon-g.github.io/matchmesh/)**: the C++ core
+compiled to WebAssembly and running in your browser. Kill nodes, split the
+network and watch the invariants hold (or, for split brain, break).
+
 ![A node is killed with kill -9 while players keep joining: within two seconds the dashboard drops it from the ring and its queues take on their backups' colours; restarted, it rejoins and gets its queues back.](docs/demo.gif)
 
 *Above: `kill -9` on node-c while 40 players a second keep joining. Its
@@ -24,11 +28,12 @@ one 2-core machine.
 | **Players lost** in chaos testing | **0** across 11 kills and 79,000 players, including 29,000 players with 3 kills at 1,000/s |
 | **Enqueue latency** at 1,000 players/s | **p50 0.78 ms, p99 3.07 ms**, including forwarding and synchronous replication |
 | **Throughput** | about **4,000 players/s** before saturating the 2 cores |
-| **Tests** | **231** C++ tests (165 of them also under ThreadSanitizer) and 14 dashboard tests |
+| **Tests** | **244** C++ tests (178 of them also under ThreadSanitizer) and 22 dashboard tests |
 
 **Built with** C++20, gRPC and Protocol Buffers, CMake presets, GoogleTest and
 ThreadSanitizer, Docker Compose, a [Crow](https://crowcpp.org) WebSocket
-gateway, and an Angular 22 dashboard with RxJS.
+gateway, an Angular 22 dashboard with RxJS, and Emscripten (WebAssembly) for
+the in-browser demo, deployed to GitHub Pages by GitHub Actions.
 
 ## Quick start
 
@@ -255,6 +260,33 @@ the system correct:
 
 Both have regression tests that fail if the old behaviour comes back.
 
+## The in-browser demo
+
+The [live demo](https://rishon-g.github.io/matchmesh/) is not an animation. It
+runs the same `core/` code as the real nodes: `core::Membership` detecting
+failures and publishing views, `core::MatchmakingEngine` matching players, and
+`core::ShardCoordinator` replicating, handing over and taking over queues.
+Only the network and the clock are simulated (`sim/`): five nodes exchange
+heartbeats and replication messages as function calls that fail when a node is
+down or on the other side of a split, on a virtual clock that fires every timer
+at the same moments a real node would. Clients arrive at a set rate and retry
+with idempotent request IDs, like the load generator.
+
+To make that possible, the decisions in `node::ShardManager` and
+`node::ReplicationClient` live in `core/` behind two small interfaces (where a
+queue lives, and how to send a copy), and the node layer only adds gRPC and a
+thread. `demo/` compiles `core/` and `sim/` to one WebAssembly module with
+Emscripten, and the dashboard's demo build drives it in step with the display.
+After every 250 ms of simulated time the simulator checks every live node's
+copies for lost players, players in two lobbies and queues served twice, and
+the page shows the counts.
+
+```bash
+emcmake cmake --preset wasm && cmake --build --preset wasm   # build/wasm/demo/matchmesh-sim.mjs
+cp build/wasm/demo/matchmesh-sim.mjs dashboard/public/sim/
+cd dashboard && npm run start:demo                            # http://localhost:4200/matchmesh/
+```
+
 ## Known limitation: split brain, and how Raft would fix it
 
 This is a failure detector, not a consensus protocol, and a node can't tell
@@ -264,7 +296,8 @@ cluster in two (say `a, b` and `c, d, e`), each side declares the other dead,
 same queues, each replicating to a backup on its own side. Epoch checks don't
 help, because each side's epochs are consistent on their own. When the split
 heals the higher epoch wins, and whatever the losing side did to those queues is
-overwritten.
+overwritten. The live demo shows exactly this: press **Split the network**,
+then heal it.
 
 **Raft** prevents this by requiring a **majority** (3 of 5) for every
 membership change: a leader is elected by a majority, and a new view is
@@ -356,13 +389,15 @@ generated from them at build time.
 
 | Path | What's there |
 |---|---|
-| `core/` | Engine, hash ring, membership and replication logic (no networking) |
+| `core/` | Engine, hash ring, membership, replication and hand-over logic (no networking) |
 | `proto/` | gRPC service contracts |
 | `node/` | `matchmesh_node` and the `matchmesh_cli` client |
 | `loadgen/` | `matchmesh_loadgen` and the invariant checker |
 | `gateway/` | `matchmesh_gateway` (Crow, WebSocket) |
-| `dashboard/` | The Angular dashboard and its nginx container |
-| `tests/` | GoogleTest: `core/`, `node/`, `loadgen/`, `gateway/`, `stress/` |
+| `sim/` | A five-node cluster on a simulated network and clock, over the real `core/` |
+| `demo/` | The simulator's WebAssembly build (Emscripten) and its smoke test |
+| `dashboard/` | The Angular dashboard (live, or the in-browser demo) and its nginx container |
+| `tests/` | GoogleTest: `core/`, `sim/`, `node/`, `loadgen/`, `gateway/`, `stress/` |
 | `scripts/` | `chaos.sh`, `cluster_demo.sh`, `smoke_test.sh` |
 | `docs/` | The demo recording |
 
