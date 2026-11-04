@@ -1,459 +1,369 @@
 # MatchMesh
 
-A fault-tolerant distributed matchmaking cluster: five C++20 nodes, gRPC,
-consistent hashing, primary-backup replication and chaos testing.
+**A fault-tolerant, sharded matchmaking cluster in C++20.** Five nodes split the
+queues between them with consistent hashing, copy every change to a backup
+before answering, notice a dead node within 1.5 seconds, and fail its queues
+over without losing a single player. A live dashboard shows the hash ring
+rebalancing as it happens.
 
-> Work in progress — currently at Phase 7 (gateway, dashboard and documentation).
+![A node is killed with kill -9 while players keep joining: within two seconds the dashboard drops it from the ring and its queues take on their backups' colours; restarted, it rejoins and gets its queues back.](docs/demo.gif)
 
-## Quick start (development container)
+*Above: `kill -9` on node-c while 40 players a second keep joining. Its
+stretches of the ring disappear and its queues fail over to their backups; when
+it restarts with an empty memory, it rejoins and the queues are handed back.
+Recorded against five real node processes.*
 
-```bash
-# 1. Build the dev image (once, or whenever the Dockerfile changes)
-docker build -t matchmesh-dev .
+## Results
 
-# 2. Open a shell inside it, with this folder mounted at /workspace
-docker run --rm -it -v "$PWD":/workspace matchmesh-dev
+All measured, not estimated: five node processes and the load generator sharing
+one 2-core machine.
 
-# 3. Inside the container: configure, build, test
-cmake --preset debug
-cmake --build --preset debug
-ctest --preset debug
-
-# 4. Run a node: serves matchmaking and Heartbeat on port 50051
-./build/debug/node/matchmesh_node --id node-a --listen 0.0.0.0:50051 --workers 4
-```
-
-Presets (configure, build and test): `debug`, `release`, `tsan` (ThreadSanitizer).
-
-Every GoogleTest case is registered with ctest on its own, so you can run just
-the ones you're working on:
-
-```bash
-ctest --preset debug -R HashRing           # tests whose name matches a regex
-ctest --preset debug -E Cluster            # everything except the slow cluster tests
-ctest --preset debug --rerun-failed        # only what failed last time
-```
-
-## Repository layout
-
-| Path | What's there |
+| What | Measured |
 |---|---|
-| `core/` | The matchmaking engine, hash ring and membership logic. Pure C++, no networking |
-| `proto/` | gRPC service contracts; C++ is generated from them at build time |
-| `node/` | The node server (`matchmesh_node`) and the `matchmesh_cli` client |
-| `loadgen/` | The load generator (`matchmesh_loadgen`) and the invariant checker |
-| `gateway/` | The WebSocket gateway (`matchmesh_gateway`): polls every node, pushes JSON to browsers |
-| `dashboard/` | The Angular dashboard: the hash ring, node health and lobbies, live |
-| `tests/` | GoogleTest suites: `core/`, `loadgen/`, `node/` (real in-process nodes), `gateway/` and `stress/` |
-| `scripts/` | Smoke test, cluster demo and chaos test |
+| **Failover** after `kill -9` | queue serving again from its backup in **1.3 to 1.5 s** (target was under 2 s) |
+| **Players lost** in chaos testing | **0** across 11 kills and 79,000 players, including 29,000 players with 3 kills at 1,000/s |
+| **Enqueue latency** at 1,000 players/s | **p50 0.78 ms, p99 3.07 ms**, including forwarding and synchronous replication |
+| **Throughput** | about **4,000 players/s** before saturating the 2 cores |
+| **Tests** | **231** C++ tests (165 of them also under ThreadSanitizer) and 14 dashboard tests |
 
-## Matchmaking engine (`core/`)
+**Built with** C++20, gRPC and Protocol Buffers, CMake presets, GoogleTest and
+ThreadSanitizer, Docker Compose, a [Crow](https://crowcpp.org) WebSocket
+gateway, and an Angular 22 dashboard with RxJS.
 
-A pure C++ library with no networking, so it can be tested in isolation.
+## Quick start
 
-- **Queues** are identified by a `QueueKey`: region, game mode and skill bracket
-  (500-point rating bands). The key is also the shard key, so every player who
-  could be matched together lives on the same node.
-- **`SkillQueue`** keeps one queue's players sorted by rating, so the closest-skill
-  neighbours are always adjacent. Duplicate players and players from the wrong
-  bracket are rejected.
-- **`Matcher`** forms four-player lobbies when the rating spread fits a tolerance
-  window. The window starts at 50 points and widens by 10 points per second of
-  waiting, up to 300. The longest-waiting player's window decides, so long waits
-  aren't starved by newcomers.
-- **`MatchmakingEngine`** holds all of a node's queues (one *shard* per queue key)
-  and runs a fixed pool of `std::jthread` workers that keep forming lobbies in the
-  background. Shards are split between workers by hash, and it is safe to call
-  from many threads at once.
-- **Lock striping:** every shard has its own mutex, so a busy queue never blocks
-  the others. The shard map is behind a reader/writer lock, and a new player
-  wakes only the one worker that owns their shard. Compared with a single global
-  lock, this roughly doubled end-to-end throughput (about 290k to 580k players/s
-  with 4 client threads and 64 queues, on a 2-core machine).
-- **`HashRing`** decides which node owns each queue, using consistent hashing.
-  Each node is placed on the ring at 100 points (virtual nodes) using a stable
-  64-bit hash, and a queue belongs to the first node point clockwise from its own
-  hash. The ring depends only on which nodes are in it, so every node computes the
-  same answer. `owners(key, 2)` gives the primary and the next distinct node
-  clockwise, the backup used for replication.
+```bash
+docker compose up -d --build       # five nodes, the gateway and the dashboard
+open http://localhost:8080         # the live dashboard
+docker compose run --rm loadgen    # 10,000 simulated players
+docker compose kill node-c         # kill a node and watch it fail over
+./scripts/chaos.sh                 # kill random nodes under load, then check nobody was lost
+```
 
-  Measured with 5 nodes and 10,000 queues: every node owns within about 14% of an
-  even share, and removing a node moves only its own queues (about 17%, close to
-  the ideal 1/5), where `hash % node_count` would move about 80%.
+## Architecture
 
-Unit tests for all of this live in [`tests/core/`](tests/core) (GoogleTest). A
-stress suite in [`tests/stress/`](tests/stress) hammers one engine from many
-threads at once and checks that nobody is lost or matched twice. Run it under
-ThreadSanitizer with `ctest --preset tsan -L stress`.
+```mermaid
+flowchart LR
+    players(["Players<br/>load generator, CLI"])
 
-## Node (`node/`)
+    subgraph cluster["Five nodes on one consistent hash ring"]
+        direction TB
+        A["node-a<br/>(coordinator)"]
+        B["node-b"]
+        C["node-c"]
+        D["node-d"]
+        E["node-e"]
+    end
 
-Each node is a gRPC server that wraps the engine:
+    gateway["Gateway<br/>C++ and Crow"]
+    dashboard["Dashboard<br/>Angular, served by nginx"]
 
-- `MatchmakingService`: `Enqueue`, `Cancel` and `GetLobby` for clients.
-- `ClusterService`: `Heartbeat` (nodes exchanging membership), `Replicate`
-  (primary to backup, and handing queues to new owners) and `GetTopology` (the
-  cluster as this node sees it).
+    players -- "Enqueue, Cancel, GetLobby<br/>to any node" --> B
+    B -- "forwarded to the<br/>queue's owner" --> D
+    D -- "every change copied<br/>before it's applied" --> E
+    A -. "every node heartbeats every other<br/>every 500 ms, sharing the membership view" .- C
+    gateway -- "GetTopology to all five,<br/>twice a second" --> cluster
+    gateway -- "JSON over a WebSocket" --> dashboard
+```
 
-**Any node accepts any request.** The `Router` builds the same hash ring on every
-node from the peer list, so each node knows who owns every queue. A request for
-another node's queue is forwarded to its owner (once: the forwarded copy carries
-an `x-matchmesh-forwarded-by` header and is never forwarded again, so
-misconfigured nodes fail fast instead of looping). The response carries
-`x-matchmesh-served-by`, naming the node that actually handled it. Forwarded
-requests also carry `x-matchmesh-epoch` (see below). If the owner is unreachable
-the caller gets `UNAVAILABLE`, which is safe to retry: within about 1.5 s the
-owner is dropped from the membership and its backup takes over its queues.
+| Component | What it does |
+|---|---|
+| [`core/`](core) | The matchmaking engine, hash ring, membership logic and replication rules. Pure C++, no networking, so all of it is unit-tested in isolation |
+| [`node/`](node) | The gRPC server around the engine: routing and forwarding, heartbeats, replication, hand-overs |
+| [`loadgen/`](loadgen) | Simulates thousands of players, records latency histograms, and checks the lost-player invariants |
+| [`gateway/`](gateway) | Polls every node and pushes one merged picture of the cluster to browsers over a WebSocket |
+| [`dashboard/`](dashboard) | The Angular app: the hash ring, node health and lobbies, live |
+| [`scripts/chaos.sh`](scripts/chaos.sh) | Kills random nodes during a load test and checks nobody was lost |
 
-Settings come from flags or environment variables:
+One enqueue, start to finish. The player can ask any node; the change exists
+on two nodes before anyone is told it worked:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant P as Player
+    participant B as node-b (asked)
+    participant D as node-d (owner)
+    participant E as node-e (backup)
+    P->>B: Enqueue(alice, 1300, us-west, ranked, request_id)
+    Note over B: hash ring at the current epoch:<br/>us-west/ranked/2 belongs to node-d
+    B->>D: forward (once), with x-matchmesh-epoch
+    Note over D: propose the change, under the queue's write lock
+    D->>E: Replicate(change 42, epoch)
+    Note over E: applies it only if change 42<br/>is next and the epoch matches
+    E-->>D: accepted
+    Note over D: apply change 42 locally
+    D-->>B: you're in (served by node-d)
+    B-->>P: you're in
+```
+
+## How it works
+
+### Sharding with consistent hashing
+
+Players are sharded by **queue** (region, game mode and a 500-point skill
+bracket), not by player, because everyone who could be matched together has to
+live on the same node. Each node sits at **100 points** on a 64-bit hash ring,
+and a queue belongs to the first point clockwise from its own hash. With 5 nodes
+and 10,000 queues, every node owns within about 14% of an even share, and
+removing a node moves only its own queues (about 17%, near the ideal 1/5,
+where `hash % nodes` would move about 80%). The ring depends only on which
+nodes are in it, so every node computes the same one independently.
+
+### Any node accepts any request
+
+Each node's router knows the whole ring, so a request for another node's queue
+is forwarded to its owner, exactly once: the forwarded copy is marked and never
+forwarded again, so a misconfigured cluster fails fast instead of looping.
+Replies say which node really served them.
+
+### Failure detection and membership
+
+Every node heartbeats every other node every **500 ms**; one silent for
+**1.5 s** is suspected dead. Suspicion is only a node's private opinion, so
+routing never follows it directly. The **coordinator** (the alive node with the
+lowest ID) turns its suspicions into an agreed **view**: the member list plus an
+**epoch** number that goes up on every change. Views spread on the heartbeats
+themselves, and each router swaps in a whole new ring per epoch, so a request is
+routed entirely by one epoch or the next, never a mix. If the coordinator dies,
+the next-lowest node simply publishes the next epoch itself.
+
+A node that crashes and restarts before anyone notices is caught by its
+**incarnation number**, picked at random on every start (the idea comes from the
+SWIM protocol): a new number means a new process with an empty memory, so it
+gets a new epoch and its queues back.
+
+### Synchronous primary-backup replication
+
+Each queue's **backup** is the next distinct node clockwise, which is also the
+node that will own it if the primary dies, so failover needs no data movement.
+Every change, whether a join, a cancel or a lobby forming, takes the same path
+under the queue's write lock: **propose, copy to the backup, then apply**. If the
+copy fails nothing changes and the player gets a retryable error, so nobody is
+ever told "you're in" while only one node knows it.
+
+- **Lobbies are atomic.** A lobby is one replicated change with a unique ID and
+  all four players, so a failover can't leave half of it formed or match anyone
+  twice.
+- **Strict order.** Changes carry per-queue sequence numbers; a backup applies
+  only the exact next one. Anything else triggers a full snapshot, which also
+  brings brand-new backups up to date.
+- **Stale nodes can't write.** Replication is accepted only at the receiver's
+  exact epoch and only from that queue's primary.
+
+### Failover and rejoin
+
+After every epoch change, each node hands any queue it no longer owns to its new
+owner and brings its own queues' backups up to date. A queue's new owner starts
+serving only once **every member has reported its hand-over finished** for that
+epoch, so it always starts from the newest copy, never from nothing. That covers
+both directions: a backup taking over from a dead primary, and a restarted node
+getting its queues back.
+
+### Exactly-once joins
+
+A client sends an **idempotency key** with each join and reuses it on every
+retry. If an earlier attempt worked and only its reply was lost, the retry is
+recognised, by the primary or by the backup that took over (the key is
+replicated), and answered with the original result instead of joining the
+player twice.
+
+### The matchmaking engine
+
+Each queue keeps its players sorted by rating. A lobby of four forms when the
+rating spread fits a window that starts at 50 points and widens by 10 per second
+of waiting (up to 300), with the longest-waiting player deciding, so nobody is
+starved by newcomers. A fixed pool of worker threads matches in the background.
+Every queue has its own lock (**lock striping**), which roughly doubled
+throughput over a single global lock (about 290k to 580k players/s in-process).
+
+### Gateway and dashboard
+
+Browsers can't call gRPC, so the **gateway** asks all five nodes for their
+topology twice a second, at the same time and with a 300 ms deadline each (a
+dead node costs one timeout, not one per node). It merges five partial answers
+into one JSON picture and pushes it over a WebSocket, but only when something
+changed. The **dashboard** draws the real ring from that data as SVG: every
+node's 100 points, every queue at its hash position, coloured by its primary and
+ringed by its backup.
+
+## Benchmarks
+
+`matchmesh_loadgen` simulates realistic traffic: **Poisson arrivals** (random
+gaps around the target rate), **bell-curve ratings** (mean 1500, standard
+deviation 300) and weighted regions and modes, all reproducible from a seed. It
+is **open-loop**: each player is sent at their scheduled time whether or not
+earlier calls have returned, and latency is measured from that time. A tester
+that waits for each reply quietly slows down whenever the server does, hiding
+the very stalls it should catch (*coordinated omission*). Latencies go into
+HdrHistogram-style log-linear histograms, accurate to within 1.6% at any scale.
+
+| Offered load (10,000 players) | Achieved | p50 | p90 | p99 | p99.9 |
+|---|---|---|---|---|---|
+| 1,000/s | 989/s | 0.78 ms | 1.28 ms | 3.07 ms | 8.45 ms |
+| 3,000/s | 2,963/s | 1.82 ms | 6.97 ms | 22.0 ms | 37.9 ms |
+| 6,000/s (past saturation) | 3,980/s | 483 ms | 762 ms | 868 ms | 1.02 s |
+
+Every enqueue is three gRPC hops (the node asked, the owner, its backup), and up
+to about 3,000 players/s each one is answered in milliseconds. Throughput tops
+out near 4,000 players/s whether the client uses 8 threads or 128, so the limit
+is the 2 CPU cores. Beyond that, open-loop measurement reports the backlog
+honestly instead of hiding it.
+
+**Time to lobby** at 1,000/s (how long matchmaking itself took): p50 108 ms, p90
+623 ms, p99 5.2 s. The long tail is players with rare ratings waiting for their
+match window to widen, which is the matchmaker trading quality for wait time as
+designed. Of 10,000 players, 9,916 were in 2,479 lobbies, 84 were still waiting
+in queues too thin to fill a lobby, and **none were lost**.
+
+Load per node was uneven (1,387 to 3,146 players): with sharding by queue and a
+bell curve of ratings, a few popular queues are much bigger than the rest, and a
+queue can't be split across nodes. A production system would split skill
+brackets more finely where players are dense.
+
+## Chaos testing
+
+[`scripts/chaos.sh`](scripts/chaos.sh) runs the load generator while it kills
+random nodes with `kill -9`, measures how long the cluster takes to drop each
+one, restarts it with an empty memory and measures its rejoin. It runs against Docker
+Compose or (with `--local`) plain processes, and a seed replays the same run.
+
+After every load test, the **invariant checker** confirms that each player who
+was told "you're in" is in **exactly one** place: one consistent lobby (four
+players from one queue, all agreeing on who's in it), or still queued. It fails
+the run on any player who was lost, is in two places, or turned up after being
+told their join failed.
+
+| Run | Players | Kills | Lost | In two lobbies | Longest wait | Dead node dropped after |
+|---|---|---|---|---|---|---|
+| 2 rounds at 500/s, 4 seeds | 12,500 each | 8 | **0** | **0** | 1.56 to 2.07 s | 1.10 to 1.55 s |
+| 3 rounds at 1,000/s | 29,000 | 3 | **0** | **0** | 1.90 s | 1.18 to 1.47 s |
+
+Only players whose queue lived on the killed node (7 to 10% of them) waited up
+to about 2 s; everyone else saw normal millisecond latencies.
+
+**What it caught.** The first chaos runs failed, and fixing what they found made
+the system correct:
+
+1. **Lobby IDs reused after a restart.** A restarted node's lobby counter began
+   again at 1 and handed out IDs its previous run had already used. IDs now
+   include the run's incarnation number.
+2. **A retry could put a player in two lobbies.** The node relaying a join died
+   after the owner had added the player; the client never heard back and
+   retried after the player had already been matched. Joins now carry an
+   idempotency key, replicated with the queue.
+
+Both have regression tests that fail if the old behaviour comes back.
+
+## Known limitation: split brain, and how Raft would fix it
+
+This is a failure detector, not a consensus protocol, and a node can't tell
+"that node crashed" from "I can't reach that node". If the network splits the
+cluster in two (say `a, b` and `c, d, e`), each side declares the other dead,
+`node-a` coordinates one side and `node-c` the other, and both keep serving the
+same queues, each replicating to a backup on its own side. Epoch checks don't
+help, because each side's epochs are consistent on their own. When the split
+heals the higher epoch wins, and whatever the losing side did to those queues is
+overwritten.
+
+**Raft** prevents this by requiring a **majority** (3 of 5) for every
+membership change: a leader is elected by a majority, and a new view is
+committed only once a majority has acknowledged it. The smaller side of a split
+can never reach a majority, so it stops making changes instead of forming a
+second cluster, and every committed view is known to at least one node of any
+future majority. The price is availability: a cluster that has lost its
+majority refuses changes until enough nodes return.
+
+## Engineering practices
+
+- **Layered for testing.** Everything in `core/` is pure logic with time passed
+  in, so failure detection is tested to the millisecond without sleeping.
+  Replication is tested by mirroring hundreds of random changes into a second
+  engine and comparing them field by field.
+- **Real clusters in tests.** `tests/node/` starts three real gRPC nodes
+  in-process and crashes and restarts them, quickly and slowly, one or two at a time.
+- **ThreadSanitizer.** The engine, replication and membership code run under TSan
+  in stress tests that hammer them from many threads at once.
+- **Mutation testing.** Key safety checks were deliberately broken, one at a
+  time, to confirm a test fails for each. That exercise exposed gaps, which got
+  new tests.
+- **Chaos and invariants.** As above: randomised kills under load, with every
+  player accounted for afterwards.
+
+## Building from source
+
+The repository builds in a container, so the toolchain is identical everywhere:
+
+```bash
+docker build -t matchmesh-dev .
+docker run --rm -it -v "$PWD":/workspace matchmesh-dev
+cmake --preset debug && cmake --build --preset debug && ctest --preset debug
+```
+
+Presets: `debug`, `release` and `tsan` (ThreadSanitizer). Each GoogleTest case is
+its own ctest test, so `ctest --preset debug -R HashRing` runs just those,
+`-E Cluster` skips the slower cluster tests, and `--rerun-failed` repeats only
+what failed. The dashboard has its own `npm ci && npm test` in
+[`dashboard/`](dashboard).
+
+<details>
+<summary><strong>Running nodes, the CLI and the load generator by hand</strong></summary>
+
+Each node takes its settings from flags or environment variables:
 
 | Flag | Variable | Example |
 |---|---|---|
 | `--id` | `MATCHMESH_NODE_ID` | `node-a` |
 | `--listen` | `MATCHMESH_LISTEN` | `0.0.0.0:50051` |
 | `--peers` | `MATCHMESH_PEERS` | `node-a=node-a:50051,node-b=node-b:50051,...` |
-| `--workers` | `MATCHMESH_WORKERS` | `4` (1 to 256; default 4) |
-
-The node shuts down cleanly on Ctrl+C or `docker stop`. `matchmesh_cli` is a small
-client for trying it by hand (`enqueue`, `get-lobby`, `cancel`, `topology`). Like a
-real client it retries `UNAVAILABLE` for up to 10 s and says how many retries it
-took. End-to-end tests in [`tests/node/`](tests/node) run three real nodes in-process.
-
-## Membership and failure detection
-
-Every node sends a `Heartbeat` to every other node every **500 ms**. Each node
-remembers when it last heard from each peer (a heartbeat in either direction);
-a peer silent for **1.5 s** is suspected dead. Suspicions are each node's own
-opinion, so routing never follows them directly. Instead:
-
-- **The coordinator** is the alive node with the lowest ID (`node-a` while it is
-  up). Only it turns its suspicions into an agreed **view**: the sorted list of
-  members plus an **epoch** number that goes up by one on every change.
-- **Views spread through heartbeats.** Every heartbeat request and reply carries
-  the sender's view; a node adopts any view with a higher epoch than its own
-  (on a tie, the one from the lower-ID coordinator wins) and passes it on
-  immediately. Empty views (as sent by `--ping` health checks) are ignored.
-- **Routing follows the view.** Each `Router` rebuilds its hash ring from the
-  view's members and swaps it in whole, so a request is routed entirely by one
-  epoch or the next, never a mix. Once every node holds the same epoch they all
-  route identically, and a dead node's queues have moved to the next node
-  clockwise on the ring.
-- **Coordinator failure** is handled the same way: when `node-a` goes silent,
-  `node-b` becomes the lowest alive node and publishes the next epoch itself.
-  A node that comes back is seen again, and the coordinator publishes it back
-  in (taking the coordinator role back if it has the lowest ID).
-- **Incarnations catch fast restarts.** Each process picks a random
-  *incarnation* number at startup and sends it in every heartbeat; views record
-  each member's incarnation. A node that crashes and is back before anyone
-  noticed (under 1.5 s) still has a new incarnation and an empty memory, so the
-  coordinator publishes a new epoch for it, which is what gets its queues handed
-  back. A process never counts as a member of a view that lists a different
-  incarnation of it. (Because epoch 0 lists no incarnations, a freshly started
-  cluster settles at epoch 1 once everyone has heard from everyone.)
-
-During a change, two nodes can briefly disagree. A forwarded request carries the
-sender's epoch in `x-matchmesh-epoch`; if it differs from the receiver's, the
-receiver answers `UNAVAILABLE` ("membership is changing; retry") rather than
-the `FAILED_PRECONDITION` it returns when two nodes at the *same* epoch
-disagree (which means the peer lists themselves differ).
-
-Peer connections retry quickly (gRPC reconnect backoff 100 ms, capped at 1 s,
-instead of the default 1 s growing to 2 min), so a node that was down for a while
-is reachable again within about a second of restarting.
-
-## Replication and failover
-
-Each queue lives on two nodes: its **primary** (the owner on the ring) and its
-**backup**, the next distinct node clockwise. Replication is **synchronous**: the
-primary copies every change to the backup and waits for it to be applied before
-the change happens on the primary or the player gets an answer.
-
-- **One path for every change.** An enqueue, a cancel and a lobby forming all go
-  *propose → copy to the backup → apply*, under that queue's write lock. If the
-  copy fails, nothing changes and the player gets a retryable `UNAVAILABLE`, so a
-  player is never told "done" for something only one node knows about. The
-  shard's own data lock is not held during the copy, so lookups stay fast.
-- **Lobbies are one change.** A lobby is proposed, copied with its unique ID and
-  all four players, and only then applied: the players leave the queue and join
-  the lobby in a single step on both nodes. A failover can't leave half a lobby
-  formed, re-match its players, or put anyone in two lobbies.
-- **Strict order.** Every change to a queue has a sequence number. A backup
-  applies a change only if it is exactly the next one; anything else (a gap, a
-  repeat, a change that doesn't fit) is rejected, and the primary then sends a
-  full **snapshot** of the queue before carrying on. The same snapshot brings a
-  brand-new backup up to date, and every epoch change re-sends it, so a backup
-  that restarted can't be silently empty.
-- **Stale nodes can't write.** `Replicate` carries the sender's epoch and is only
-  accepted at the receiver's exact epoch, and only from the node the receiver
-  believes is that queue's primary. A node that has fallen behind (or was cut
-  off) can't overwrite newer state.
-
-**Moving queues when the view changes.** Every node walks the queues it holds:
-one it no longer owns is frozen (demoted to a replica), sent to its new owner, and
-dropped unless this node is now its backup; one it still owns gets its (possibly
-new) backup brought up to date. A node reports through heartbeats when it has
-finished, and a queue's **new owner starts serving only once every member has
-reported finishing for the current epoch** (until then it answers `UNAVAILABLE`,
-retry). That covers both directions:
-
-- *Failover:* the primary dies, the next epoch makes its backup the owner, and
-  the backup's copy goes live with every waiting player and every lobby intact.
-- *Rejoin:* a node comes back empty, the next epoch gives it its queues back, and
-  whoever held them hands them over before it serves.
-
-Measured on a real five-process cluster with the default timings (500 ms
-heartbeats, 1.5 s suspicion): `kill -9` of the node owning a queue had that queue
-answering again from its backup after **1.3 to 1.5 s** (1,311 ms; 1,499 ms when the
-killed node was the coordinator), within the 2 s target. In every run, all 60 players (40 in
-lobbies, 20 queued) had exactly the same status and lobby after the crash and
-again after the killed node restarted and took its queues back.
-[`tests/node/cluster_test.cpp`](tests/node/cluster_test.cpp) checks crashes,
-coordinator failover, fast and slow restarts, a backup and then a primary dying,
-lobbies surviving failover, stale-epoch rejection and the 2 s target with real
-nodes; [`tests/core/replication_test.cpp`](tests/core/replication_test.cpp)
-mirrors hundreds of random changes into a second engine and checks both end up
-identical.
-
-What this does **not** survive: a queue's primary *and* backup dying within the
-same ~1.5 s detection window (only two copies exist). While a dead node hasn't
-been noticed yet, changes to the queues it held (as primary or backup) fail
-retryably, and new owners wait for it to be dropped before serving.
-
-### Limitation: split brain
-
-This is a simple failure detector, not a consensus protocol. If the network
-splits the cluster in two (say `a, b` | `c, d, e`), each side suspects the other,
-`node-a` coordinates one side and `node-c` the other, and both keep serving the
-queues they now believe they own, each replicating to a backup on its own side.
-Epoch checks don't help here, because each side's epochs are internally
-consistent. Both sides run happily until the split heals, at which point the
-higher epoch wins, its queues are handed over, and whatever the losing side did
-to the same queues (players queued, lobbies formed) is overwritten. One-way or
-flaky links can also make the view flap. Nodes can't tell "that node crashed"
-from "I can't reach that node".
-
-A consensus protocol such as **Raft** fixes this by requiring a **majority**
-(3 of 5) for every membership change: a leader is elected by a majority, and
-it may commit a new view only after a majority acknowledges it. The minority
-side of a split can never gather a majority, so it stops making changes
-instead of forming a second cluster, and every committed view is seen by at
-least one node of any future majority. The cost is that a cluster that has
-lost its majority stops accepting changes until enough nodes return.
-
-## Five-node cluster
+| `--workers` | `MATCHMESH_WORKERS` | `4` (1 to 256) |
 
 ```bash
-docker compose up -d --build     # build the images; start node-a .. node-e, gateway, dashboard
-./scripts/cluster_demo.sh        # every player joins via node-a; watch where they land
-docker compose exec node-a matchmesh_cli --target node-c:50051 enqueue alice 1300 us-west ranked
-docker compose down
-```
+# Ask any node; the reply says which node served it. The CLI retries UNAVAILABLE like a client.
+docker compose exec node-a matchmesh_cli --target node-a:50051 enqueue alice 1300 us-west ranked
+docker compose exec node-a matchmesh_cli --target node-a:50051 get-lobby alice 1300 us-west ranked
+docker compose exec node-a matchmesh_cli --target node-a:50051 topology
+./scripts/cluster_demo.sh                       # eight players, all through node-a: watch where they land
 
-To watch failover, put a player in a queue, kill the node holding it, and ask
-another node about them:
+# Load: --players, --rate (per second, Poisson), --threads, --seed, --json
+docker compose run --rm loadgen --players 10000 --rate 3000
 
-```bash
-docker compose exec node-a matchmesh_cli --target node-a:50051 get-lobby us-4 1204 us-west ranked
-#   us-4: PLAYER_STATUS_IN_LOBBY node-d-1 [...]  (asked node-a:50051, served by node-d)
-docker compose kill node-d                     # SIGKILL: no clean shutdown
-docker compose exec node-a matchmesh_cli --target node-a:50051 get-lobby us-4 1204 us-west ranked
-#   same lobby, now served by node-d's backup (after a few retries while it takes over)
-docker compose exec node-a matchmesh_cli --target node-a:50051 topology   # node-d DOWN
-docker compose start node-d                    # comes back empty and gets its queues back
-docker compose logs node-b                     # each epoch and hand-over as it happened
-```
-
-(`us-4` is from `cluster_demo.sh`; which node owns its queue depends on the ring,
-so kill whichever node the first command says served it.)
-
-## Dashboard
-
-```bash
-docker compose up -d --build     # nodes, gateway and dashboard
-open http://localhost:8080       # the live dashboard
-docker compose run --rm loadgen  # give it something to show
-docker compose kill node-c       # and watch the ring rebalance
-```
-
-The dashboard draws the **real hash ring**: a band coloured by which node owns
-each stretch (every node holds 100 places round it), and every queue as a dot
-at the position its name hashes to, filled with its primary's colour and ringed
-with its backup's. Beside it are each node's health and load, and the lobbies
-forming right now. Kill a node and, within about 0.5 s, it shows as unreachable;
-about a second later the epoch ticks over, its stretches vanish from the ring,
-and its queues take on the colour of the backups that took them over.
-
-Two pieces make it work, because browsers can't call gRPC:
-
-- **The gateway** ([`gateway/`](gateway)), a small C++ server built on the
-  header-only [Crow](https://crowcpp.org) framework. Twice a second it asks
-  every node for `GetTopology` (all at once, each with a 300 ms deadline, so a
-  dead node costs one timeout rather than delaying the others), merges the
-  answers, and pushes the result as JSON to every connected browser over a
-  WebSocket at `/ws`, but only when something changed. Each node reports the
-  shared membership view plus only its own queues and lobbies, so the merge is
-  what turns five partial views into one picture. `GET /api/topology` returns
-  the same JSON once.
-- **The dashboard** ([`dashboard/`](dashboard)), an Angular 22 app (standalone
-  components, signals, zoneless) that subscribes with RxJS's `webSocket`,
-  reconnects by itself with backoff, and draws the ring as SVG. In Compose it's
-  served by nginx, which forwards `/ws` and `/api` to the gateway. For
-  development, `npm start` in `dashboard/` proxies to a gateway on port 8081.
-
-## Load testing
-
-`matchmesh_loadgen` ([`loadgen/`](loadgen)) simulates players joining the
-cluster and reports how fast it answered and how long matchmaking took.
-
-```bash
-docker compose up -d --build
-docker compose run --rm loadgen                       # 10,000 players at 1,000/s
-docker compose run --rm loadgen --rate 3000 --json /tmp/out.json
-# or, outside Docker:
-matchmesh_loadgen --targets localhost:50051,localhost:50052 --players 10000 --rate 1000
-```
-
-**The workload looks like real traffic.** Players arrive as a Poisson process
-(random gaps around the target rate, so there are bursts and lulls), ratings
-follow a bell curve (mean 1500, standard deviation 300), and regions and modes
-are weighted (us-west 30% ... asia 15%; ranked 60%, casual 40%). The same
-`--seed` always produces the same players.
-
-**Open-loop measurement.** Each player is sent at their scheduled time whether
-or not earlier calls have returned, and latency is measured from that scheduled
-time. A tester that waits for each reply before sending the next quietly slows
-down whenever the server does, hiding exactly the stalls you want to see
-(*coordinated omission*). Players go to the nodes round-robin, and like a real
-client the generator retries `UNAVAILABLE` on the next node.
-
-Two latencies, each kept in a log-linear histogram (HdrHistogram's layout: under
-1.6% error at any scale, fixed memory, one per thread merged at the end):
-
-- **Enqueue latency**: scheduled arrival to reply, including forwarding to the
-  queue's owner and the synchronous copy to its backup.
-- **Time to lobby**: the server's `enqueued_at` to the lobby's `formed_at`. This
-  measures matchmaking itself (how long until three similar players show up),
-  not server speed.
-
-Afterwards it asks where every player ended up: in a lobby, still queued, or
-unknown to the cluster (which would mean a lost player).
-
-### Results
-
-Five nodes as separate processes on one machine, release build, 2 worker
-threads each, sharing **2 CPU cores** with the load generator. A laptop with
-more cores will do better; the shape is what matters.
-
-| Offered load | Achieved | Enqueue p50 | p90 | p99 | p99.9 |
-|---|---|---|---|---|---|
-| 10,000 players at 1,000/s | 989/s | 0.78 ms | 1.28 ms | 3.07 ms | 8.45 ms |
-| 10,000 players at 3,000/s | 2,963/s | 1.82 ms | 6.97 ms | 22.0 ms | 37.9 ms |
-| 10,000 players at 6,000/s | 3,980/s | 483 ms | 762 ms | 868 ms | 1.02 s |
-
-- Up to about 3,000 players/s every enqueue (three gRPC hops: the node asked,
-  the queue's owner, its backup) is answered in milliseconds. Throughput tops
-  out around **4,000 players/s** on 2 cores, the same with 8 or 128 client
-  threads, so the limit is CPU, not the client. Past that, open-loop
-  measurement shows the honest result: a backlog builds and latency climbs to
-  seconds, instead of the tester quietly slowing down.
-- Time to lobby at 1,000/s: **p50 108 ms, p90 623 ms, p99 5.2 s**. A quarter of
-  players match in under a millisecond (they were the fourth to arrive and
-  completed a lobby); most wait for three similar players. The long tail is
-  players with rare ratings in thin queues, who wait for the match window to
-  widen. That's the matchmaker trading quality for wait time, as designed.
-- Every player accounted for: 9,916 in 2,479 lobbies, 84 still waiting in
-  queues with fewer than four compatible players, **0 lost**.
-- Load per node was uneven (1,387 to 3,146 players). Players are sharded by
-  *queue*, and a bell curve of ratings makes a few queues (mid ratings in
-  popular regions) much bigger than the rest. Every queue's players must live
-  together, so a hot queue can't be split across nodes. A real system would
-  split brackets more finely where players are dense.
-
-## Chaos testing
-
-[`scripts/chaos.sh`](scripts/chaos.sh) kills random nodes while the load generator
-is running, brings them back, and then checks that nobody was lost.
-
-```bash
-./scripts/chaos.sh                         # against the Docker Compose cluster
-./scripts/chaos.sh --local                 # five local processes from build/release
+# Chaos: --rounds, --down (seconds), --rate, --seed, --local
 ./scripts/chaos.sh --rounds 3 --down 3 --rate 1000 --seed 101
 ```
 
-Each round it `kill -9`s a random node (`docker compose kill` sends SIGKILL, so
-there's no clean shutdown), times how long the others take to drop it from the
-membership, leaves it down, restarts it with empty memory, and times how long
-it takes to be a member again. The same `--seed` picks the same victims and
-the same players. Results land in `chaos-results/`.
+The gateway serves `GET /ws` (WebSocket), `GET /api/topology` (the same JSON,
+once) and `GET /healthz` on port 8081.
 
-**The invariant checker** ([`loadgen/src/invariants.cpp`](loadgen/src/invariants.cpp))
-runs after every load test, chaos or not. Every player who was told "you're in"
-must be in exactly one place:
+</details>
 
-- in **exactly one lobby**, and that lobby must be consistent: every member
-  reports the same four players, all from the same queue, and every member says
-  it is in that lobby; or
-- **still queued**, and in no lobby.
+<details>
+<summary><strong>Service contracts</strong></summary>
 
-It fails the run for a player the cluster has forgotten (**lost**), a player in
-two lobbies or in a lobby and still queued (**in two places**), an inconsistent
-lobby, or a **ghost** (a player whose enqueue was reported as failed, found in a
-lobby anyway).
-
-### What it found
-
-The first runs failed, which is what a chaos test is for. Both bugs have
-regression tests in [`tests/node/cluster_test.cpp`](tests/node/cluster_test.cpp).
-
-1. **Lobby IDs reused after a restart.** A restarted node's lobby counter began
-   again at 1, so it handed out `node-b-1` a second time, for a different
-   lobby. Lobby IDs now include the run's incarnation number
-   (`node-b-9f3c2a1e-17`), so a restarted node can never repeat one.
-2. **A retried enqueue could join a player twice.** The node relaying an
-   enqueue died after the owner had added the player, so the client never got
-   its "you're in" and retried. By then the player had been matched, so the
-   retry queued them again, and they ended up in two lobbies. Enqueue now takes
-   an **idempotency key** (`request_id`): a client sends the same ID on every
-   retry of one join, and the owner (or, after a failover, its backup, since
-   the key is replicated) answers a repeat with the original result instead
-   of joining the player again.
-
-### Results
-
-Same 2-core machine as above, `--local`, five node processes:
-
-| Run | Players | Kills | Lost | In two places | Longest wait for "you're in" | Dropped from membership after |
-|---|---|---|---|---|---|---|
-| 2 rounds at 500/s, 4 seeds | 12,500 each | 8 | 0 | 0 | 1.56 to 2.07 s | 1.10 to 1.55 s |
-| 3 rounds at 1,000/s | 29,000 | 3 | 0 | 0 | 1.90 s | 1.18 to 1.47 s |
-
-A killed node is dropped from the membership 1.0 to 1.6 s after the kill (up
-to 1.5 s of silence, counted from its last heartbeat, which was up to 500 ms
-before the kill), and a restarted node is back in within about 0.1 s. The
-players whose queues lived on the killed node (7 to 10% of them per run) waited
-up to about 2 s while their queue failed over: detection, the hand-over, and up
-to 250 ms of the client's own retry backoff. Everyone else saw normal
-millisecond latencies.
-
-## Service contracts
-
-The gRPC APIs live in [`proto/matchmesh/v1/`](proto/matchmesh/v1) (package `matchmesh.v1`).
-C++ code is generated from them at build time into `build/<preset>/proto/gen/`
-and compiled into the `matchmesh_proto` library.
+The gRPC APIs are in [`proto/matchmesh/v1/`](proto/matchmesh/v1); C++ is
+generated from them at build time.
 
 | File | Contents |
 |---|---|
-| `common.proto` | Shared types: `Player`, `QueueKey` (the shard key: region, game mode, skill bracket), `Lobby` |
-| `matchmaking.proto` | `MatchmakingService`: `Enqueue`, `Cancel`, `GetLobby` (clients → any node) |
-| `cluster.proto` | `ClusterService`: `Heartbeat` (membership, incarnations, hand-over progress), `Replicate` (changes and snapshots), `GetTopology` (node ↔ node, gateway) |
+| `common.proto` | `Player`, `QueueKey` (the shard key), `Lobby` |
+| `matchmaking.proto` | `MatchmakingService`: `Enqueue` (with an optional idempotency key), `Cancel`, `GetLobby`. Clients call any node |
+| `cluster.proto` | `ClusterService`: `Heartbeat` (membership views, incarnations, hand-over progress), `Replicate` (changes and snapshots), `GetTopology` (for the gateway) |
 
-## Smoke test
+</details>
 
-Proves two containers can reach each other over gRPC. Run on your machine, from the repo root,
-after building the dev image:
+<details>
+<summary><strong>Repository layout</strong></summary>
 
-```bash
-./scripts/smoke_test.sh
-```
+| Path | What's there |
+|---|---|
+| `core/` | Engine, hash ring, membership and replication logic (no networking) |
+| `proto/` | gRPC service contracts |
+| `node/` | `matchmesh_node` and the `matchmesh_cli` client |
+| `loadgen/` | `matchmesh_loadgen` and the invariant checker |
+| `gateway/` | `matchmesh_gateway` (Crow, WebSocket) |
+| `dashboard/` | The Angular dashboard and its nginx container |
+| `tests/` | GoogleTest: `core/`, `node/`, `loadgen/`, `gateway/`, `stress/` |
+| `scripts/` | `chaos.sh`, `cluster_demo.sh`, `smoke_test.sh` |
+| `docs/` | The demo recording |
 
-It starts `node-a` as a server and has `node-b` send it a `Heartbeat` ping.
+</details>
