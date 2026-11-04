@@ -95,6 +95,14 @@ TEST_F(SimClusterTest, TrafficCanBeStoppedAndRestarted) {
     EXPECT_GT(cluster_.invariants().acknowledged, 0U);
 }
 
+TEST_F(SimClusterTest, ShortAdvancesAddUp) {
+    // One display frame at 60 Hz is 16.7 ms: less than two 10 ms steps.
+    for (int frame = 0; frame < 600; ++frame) {
+        cluster_.advance(1000.0 / 60.0);
+    }
+    EXPECT_NEAR(cluster_.now_ms(), 10 * kSecond, 10.0);
+}
+
 TEST_F(SimClusterTest, SameSeedSameRun) {
     Cluster other{SimConfig{.arrivals_per_second = 40.0, .seed = 7}};
     cluster_.advance(4 * kSecond);

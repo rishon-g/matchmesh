@@ -65,6 +65,7 @@ public:
     Cluster& operator=(const Cluster&) = delete;
 
     // Moves virtual time forward by `ms`, running everything due on the way.
+    // Time runs in whole 10 ms steps; a remainder is kept for the next call.
     void advance(double ms);
 
     // Crash a node (its memory is gone) and start a fresh process for it.

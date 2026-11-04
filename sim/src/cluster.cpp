@@ -200,9 +200,12 @@ public:
 
     // ---- Time ----
 
+    // Time not yet run because it didn't fill a whole step carries over, so
+    // many short calls (one per display frame) add up to the right total.
     void advance(double ms) {
-        const double until = now_ms_ + std::max(0.0, ms);
-        while (now_ms_ + kStepMs <= until + 1e-9) {
+        unrun_ms_ += std::max(0.0, ms);
+        while (unrun_ms_ >= kStepMs - 1e-9) {
+            unrun_ms_ -= kStepMs;
             now_ms_ += kStepMs;
             step();
         }
@@ -370,6 +373,7 @@ public:
     SimConfig config_;
     std::mt19937_64 rng_;
     double now_ms_ = 0.0;
+    double unrun_ms_ = 0.0;
     std::map<std::string, std::unique_ptr<Node>> nodes_;  // only live processes
     bool split_ = false;
 
