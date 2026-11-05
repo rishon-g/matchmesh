@@ -1,14 +1,26 @@
 # MatchMesh
 
-**A fault-tolerant, sharded matchmaking cluster in C++20.** Five nodes split the
-queues between them with consistent hashing, copy every change to a backup
-before answering, notice a dead node within 1.5 seconds, and fail its queues
-over without losing a single player. A live dashboard shows the hash ring
-rebalancing as it happens.
+**The backend that puts players into matches**, like the one behind "Find match"
+in an online multiplayer game. Players join a queue, and the system groups
+people of similar skill into four-player lobbies. MatchMesh runs that across a
+cluster of five servers, so matches keep forming even when one of them crashes.
 
-**[▶ Try the live demo](https://rishon-g.github.io/matchmesh/)**: the C++ core
-compiled to WebAssembly and running in your browser. Kill nodes, split the
-network and watch the invariants hold (or, for split brain, break).
+**Why that's hard:** each server holds some of the queues in memory. If a
+server dies, the players waiting on it would vanish, and if two servers both
+think they own a queue, a player can end up in two matches at once. MatchMesh
+copies every change to a second server before telling the player "you're in",
+detects a crashed server within 1.5 seconds, and moves its queues to their
+backups. In chaos testing it lost **0 of 79,000 players** across 11 crashes.
+
+**[▶ Try the live demo](https://rishon-g.github.io/matchmesh/)**. It runs in
+your browser, with nothing to install: crash servers, cut the network in two,
+and watch whether any player is lost. (It's the real C++ code compiled to
+WebAssembly, not an animation.)
+
+**Under the hood:** C++20 and gRPC. Queues are sharded across nodes with
+consistent hashing, replicated with synchronous primary-backup replication,
+and moved by a heartbeat-based membership protocol with epoch-numbered views.
+A live dashboard shows the hash ring rebalancing as it happens.
 
 ![A node is killed with kill -9 while players keep joining: within two seconds the dashboard drops it from the ring and its queues take on their backups' colours; restarted, it rejoins and gets its queues back.](docs/demo.gif)
 
