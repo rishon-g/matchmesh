@@ -1,42 +1,40 @@
 # MatchMesh
 
-When you press "Find match" in an online game, a matchmaking service puts you
-in a queue and waits until it can group you with players of similar skill.
-MatchMesh is that service, built to keep working when its servers fail.
+**A fault-tolerant matchmaking backend for online games, in C++20: five servers share the queues, and any one can crash without losing a single waiting player.**
 
-The queues are spread across five servers, and every player who joins is copied
-to a second server before being told they're in. When a server crashes, the
-others notice within 1.5 seconds and take over its queues from those copies, so
-nobody waiting is lost. In chaos tests that crashed servers 11 times while
-79,000 players joined, not one was lost.
+[![Demo site](https://github.com/rishon-g/matchmesh/actions/workflows/demo.yml/badge.svg)](https://github.com/rishon-g/matchmesh/actions/workflows/demo.yml)
+![C++20](https://img.shields.io/badge/C%2B%2B20-00599C?logo=cplusplus&logoColor=white)
+![gRPC](https://img.shields.io/badge/gRPC-244C5A?logo=google&logoColor=white)
+![WebAssembly](https://img.shields.io/badge/WebAssembly-654FF0?logo=webassembly&logoColor=white)
+![Angular](https://img.shields.io/badge/Angular-DD0031?logo=angular&logoColor=white)
+![Docker](https://img.shields.io/badge/Docker-2496ED?logo=docker&logoColor=white)
 
-**[Try it in your browser →](https://rishon-g.github.io/matchmesh/)** Crash
-servers, split the network in two, and see what happens to the players. The
-demo runs the project's actual C++ code, compiled to WebAssembly.
-
-Built with C++20 and gRPC, using consistent hashing to divide the queues,
-synchronous primary-backup replication, and heartbeat-based failure detection.
-A live dashboard shows the cluster rebalancing as servers come and go.
+**[▶ Try the live demo](https://rishon-g.github.io/matchmesh/)**: the real C++ core, compiled to WebAssembly, running five servers in your browser. Crash them, split the network, and watch what happens to the players.
 
 ![A node is killed with kill -9 while players keep joining: within two seconds the dashboard drops it from the ring and its queues take on their backups' colours; restarted, it rejoins and gets its queues back.](docs/demo.gif)
 
-*Above: `kill -9` on node-c while 40 players a second keep joining. Its
-stretches of the ring disappear and its queues fail over to their backups; when
-it restarts with an empty memory, it rejoins and the queues are handed back.
-Recorded against five real node processes.*
+When you press "Find match" in an online game, a matchmaking service puts you in a queue until it can group you with players of similar skill. Spread across several servers, a naive version loses everyone waiting on a server that crashes, puts a player in two matches when two servers both think they own a queue, and creates duplicate entries when a client retries. MatchMesh prevents all three: every change is copied to a backup server before the player is told they're in, a crashed server is detected within 1.5 seconds and its queues move to their backups, epoch numbers stop stale servers from overwriting newer data, and request IDs make retries safe. It's written in C++20 with gRPC, tested under ThreadSanitizer and chaos testing, and runs in Docker Compose with a live dashboard.
 
-## Results
+## At a glance
 
-All real measures: five node processes and the load generator sharing
-one 2-core machine.
+All measured with five real node processes and the load generator sharing one 2-core machine.
 
-| What | Measured |
-|---|---|
-| **Failover** after `kill -9` | queue serving again from its backup in **1.3 to 1.5 s** (target was under 2 s) |
-| **Players lost** in chaos testing | **0** across 11 kills and 79,000 players, including 29,000 players with 3 kills at 1,000/s |
-| **Enqueue latency** at 1,000 players/s | **p50 0.78 ms, p99 3.07 ms**, including forwarding and synchronous replication |
-| **Throughput** | about **4,000 players/s** before saturating the 2 cores |
-| **Tests** | **244** C++ tests (178 of them also under ThreadSanitizer) and 22 dashboard tests |
+| | |
+| --- | --- |
+| **Failover** | A crashed server's queues are served again from their backups in **1.3 to 1.5 s** after `kill -9` (target: under 2 s) |
+| **Correctness** | **0 players lost** across 11 crashes and 79,000 players in chaos testing, including 3 crashes during 29,000 players at 1,000/s |
+| **Latency** | **p50 0.78 ms, p99 3.07 ms** to join a queue at 1,000 players/s, including forwarding and synchronous replication |
+| **Throughput** | About **4,000 players/s** before saturating the 2 cores |
+| **Testing** | **244** C++ tests (178 also under ThreadSanitizer), 22 dashboard tests, and a WebAssembly smoke test in CI |
+
+## Highlights
+
+- **No lost players.** Synchronous primary-backup replication: a change is applied only once its backup has it, so a player who was told "you're in" survives the crash of the server holding their queue.
+- **Fast, automatic failover.** Heartbeats every 500 ms detect a dead server within 1.5 s. The live server with the lowest ID publishes a new membership view, and each queue's backup takes over once every server has handed off what it no longer owns.
+- **Safe across restarts and retries.** Epoch-numbered views make a stale server's writes bounce. Incarnation numbers tell a restarted server from its old self, and idempotency keys stop a retried request from queuing a player twice.
+- **Even sharding.** Consistent hashing with 100 virtual nodes per server spreads queues evenly, and moves only about a fifth of them when a server joins or leaves.
+- **Proven, not assumed.** A chaos script kills random servers under load and then checks that every player is in exactly one lobby or still waiting. Planted bugs confirmed that the tests catch each safety check failing.
+- **One core, two runtimes.** The replication and failover logic in `core/` has no networking, so the same code runs in the real gRPC nodes and, compiled to WebAssembly, in the browser demo.
 
 **Built with** C++20, gRPC and Protocol Buffers, CMake presets, GoogleTest and
 ThreadSanitizer, Docker Compose, a [Crow](https://crowcpp.org) WebSocket
