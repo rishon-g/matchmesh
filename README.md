@@ -1,26 +1,22 @@
 # MatchMesh
 
-**The backend that puts players into matches**, like the one behind "Find match"
-in an online multiplayer game. Players join a queue, and the system groups
-people of similar skill into four-player lobbies. MatchMesh runs that across a
-cluster of five servers, so matches keep forming even when one of them crashes.
+When you press "Find match" in an online game, a matchmaking service puts you
+in a queue and waits until it can group you with players of similar skill.
+MatchMesh is that service, built to keep working when its servers fail.
 
-**Why that's hard:** each server holds some of the queues in memory. If a
-server dies, the players waiting on it would vanish, and if two servers both
-think they own a queue, a player can end up in two matches at once. MatchMesh
-copies every change to a second server before telling the player "you're in",
-detects a crashed server within 1.5 seconds, and moves its queues to their
-backups. In chaos testing it lost **0 of 79,000 players** across 11 crashes.
+The queues are spread across five servers, and every player who joins is copied
+to a second server before being told they're in. When a server crashes, the
+others notice within 1.5 seconds and take over its queues from those copies, so
+nobody waiting is lost. In chaos tests that crashed servers 11 times while
+79,000 players joined, not one was lost.
 
-**[▶ Try the live demo](https://rishon-g.github.io/matchmesh/)**. It runs in
-your browser, with nothing to install: crash servers, cut the network in two,
-and watch whether any player is lost. (It's the real C++ code compiled to
-WebAssembly, not an animation.)
+**[Try it in your browser →](https://rishon-g.github.io/matchmesh/)** Crash
+servers, split the network in two, and see what happens to the players. The
+demo runs the project's actual C++ code, compiled to WebAssembly.
 
-**Under the hood:** C++20 and gRPC. Queues are sharded across nodes with
-consistent hashing, replicated with synchronous primary-backup replication,
-and moved by a heartbeat-based membership protocol with epoch-numbered views.
-A live dashboard shows the hash ring rebalancing as it happens.
+Built with C++20 and gRPC, using consistent hashing to divide the queues,
+synchronous primary-backup replication, and heartbeat-based failure detection.
+A live dashboard shows the cluster rebalancing as servers come and go.
 
 ![A node is killed with kill -9 while players keep joining: within two seconds the dashboard drops it from the ring and its queues take on their backups' colours; restarted, it rejoins and gets its queues back.](docs/demo.gif)
 
