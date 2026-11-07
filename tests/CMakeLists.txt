@@ -14,6 +14,7 @@ add_executable(matchmesh_core_tests
     core/shard_coordinator_test.cpp
     core/hash_ring_test.cpp
     core/membership_test.cpp
+    core/placement_test.cpp
     core/version_test.cpp)
 
 # gtest_main supplies main(), so the test files contain only tests.
