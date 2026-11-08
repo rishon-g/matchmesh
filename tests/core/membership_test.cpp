@@ -85,6 +85,12 @@ TEST(MembershipTest, SortsAndDeduplicatesTheNodeList) {
     EXPECT_EQ(m.self(), "node-b");
 }
 
+TEST(MembershipTest, ExposesItsIncarnationAndConfig) {
+    const Membership m("node-a", kNodes, TimePoint{}, MembershipConfig{800ms}, 7);
+    EXPECT_EQ(m.incarnation(), 7U);
+    EXPECT_EQ(m.config().suspect_after, 800ms);
+}
+
 // ---- Failure detection ----
 
 TEST(MembershipTest, ANodeIsAliveWhileWeKeepHearingFromIt) {
