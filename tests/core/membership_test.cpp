@@ -109,6 +109,14 @@ TEST(MembershipTest, ANodeSilentForMoreThanOnePointFiveSecondsIsSuspected) {
     EXPECT_FALSE(m.is_alive("node-b", TimePoint{} + 2501ms));  // just over
 }
 
+TEST(MembershipTest, ACustomSuspectAfterChangesWhenANodeIsSuspected) {
+    Membership m("node-a", kNodes, TimePoint{}, MembershipConfig{500ms});
+    hear_from(m, {"node-b"}, TimePoint{} + 1s);
+
+    EXPECT_TRUE(m.is_alive("node-b", TimePoint{} + 1500ms));   // exactly 500 ms of silence
+    EXPECT_FALSE(m.is_alive("node-b", TimePoint{} + 1501ms));  // just over
+}
+
 TEST(MembershipTest, WeAlwaysConsiderOurselvesAlive) {
     const Membership m("node-c", kNodes, TimePoint{});
     EXPECT_TRUE(m.is_alive("node-c", TimePoint{} + 1h));
