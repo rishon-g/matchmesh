@@ -316,5 +316,18 @@ TEST(HashRingTest, PointsListTheWholeRingInClockwiseOrder) {
               HashRing::position(to_string(make_queue_key("eu", "ranked", 1300))));
 }
 
+TEST(HashRingTest, RemovingANodeDropsAllOfItsPointsAndKeepsTheRest) {
+    HashRing ring(10);
+    ring.add_node("node-a");
+    ring.add_node("node-b");
+    ASSERT_EQ(ring.points().size(), 20u);
+
+    ASSERT_TRUE(ring.remove_node("node-a"));
+
+    const auto points = ring.points();
+    EXPECT_EQ(points.size(), 10u);
+    EXPECT_TRUE(std::ranges::all_of(points, [](const HashRing::Point& p) { return p.node == "node-b"; }));
+}
+
 }  // namespace
 }  // namespace matchmesh::core
