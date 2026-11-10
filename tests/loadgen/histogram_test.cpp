@@ -116,6 +116,19 @@ TEST(HistogramTest, MergingGivesTheSameAnswersAsRecordingEverythingInOne) {
     }
 }
 
+TEST(HistogramTest, MergingAnEmptyHistogramChangesNothing) {
+    LatencyHistogram h;
+    h.record(40us);
+    h.record(900us);
+
+    h.merge(LatencyHistogram{});
+
+    EXPECT_EQ(h.count(), 2u);
+    EXPECT_EQ(h.min(), 40us);  // not pulled down to the empty one's 0
+    EXPECT_EQ(h.max(), 900us);
+    EXPECT_EQ(h.mean(), 470us);
+}
+
 TEST(HistogramTest, RangesCoverEverySampleInPowersOfTwo) {
     LatencyHistogram h;
     h.record(3us);     // [2, 4)
