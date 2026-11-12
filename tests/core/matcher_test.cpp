@@ -180,6 +180,20 @@ TEST_F(MatcherTest, LobbyIdsAreUniqueAndIncreaseAcrossCalls) {
     EXPECT_EQ(second.front().lobby_id, "node-a-2");
 }
 
+TEST_F(MatcherTest, ProposeLeavesTheQueueAloneButUsesUpALobbyId) {
+    add({{"a1", 1000}, {"a2", 1010}, {"a3", 1020}, {"a4", 1030}}, t0_);
+
+    const auto proposed = matcher_.propose(queue_, t0_);
+    ASSERT_TRUE(proposed.has_value());
+    EXPECT_EQ(proposed->lobby_id, "node-a-1");
+    EXPECT_EQ(queue_.size(), 4u);
+
+    // The dropped proposal's ID is not handed out again.
+    const auto lobbies = matcher_.match(queue_, t0_);
+    ASSERT_EQ(lobbies.size(), 1u);
+    EXPECT_EQ(lobbies.front().lobby_id, "node-a-2");
+}
+
 TEST_F(MatcherTest, NoPlayerEndsUpInTwoLobbies) {
     // 13 players in a tight band: three lobbies form and one player is left.
     add({{"p01", 1200}, {"p02", 1201}, {"p03", 1202}, {"p04", 1203}, {"p05", 1204},
