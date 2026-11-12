@@ -149,6 +149,16 @@ TEST_F(SkillQueueTest, PlayerCanRejoinAfterCancelling) {
     EXPECT_EQ(queue_.begin()->enqueued_at, t0_ + 5s);
 }
 
+TEST_F(SkillQueueTest, RejoiningGoesBehindEqualRatingsThatStayed) {
+    ASSERT_EQ(queue_.enqueue({"alice", 1300}, t0_), EnqueueResult::kAdded);
+    ASSERT_EQ(queue_.enqueue({"bob", 1300}, t0_), EnqueueResult::kAdded);
+    ASSERT_TRUE(queue_.remove("alice").has_value());
+
+    // alice gets a fresh arrival number, so she no longer jumps ahead of bob.
+    ASSERT_EQ(queue_.enqueue({"alice", 1300}, t0_ + 1s), EnqueueResult::kAdded);
+    EXPECT_EQ(ids_in_order(), (std::vector<std::string>{"bob", "alice"}));
+}
+
 TEST_F(SkillQueueTest, ClearEmptiesTheQueue) {
     ASSERT_EQ(queue_.enqueue({"alice", 1100}, t0_), EnqueueResult::kAdded);
     ASSERT_EQ(queue_.enqueue({"bob", 1200}, t0_), EnqueueResult::kAdded);
