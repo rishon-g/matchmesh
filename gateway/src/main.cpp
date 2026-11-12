@@ -83,11 +83,12 @@ int main(int argc, char** argv) {
         return EXIT_FAILURE;
     }
     const auto colon = options.listen.rfind(':');
+    const char* const listen_end = options.listen.data() + options.listen.size();
     std::uint16_t port = 0;
+    // Also reject trailing characters, so "host:80x" isn't read as port 80.
     if (colon == std::string::npos ||
-        std::from_chars(options.listen.data() + colon + 1,
-                        options.listen.data() + options.listen.size(), port)
-                .ec != std::errc{}) {
+        std::from_chars(options.listen.data() + colon + 1, listen_end, port) !=
+            std::from_chars_result{listen_end, std::errc{}}) {
         std::cerr << "--listen must be host:port\n";
         return EXIT_FAILURE;
     }
