@@ -372,7 +372,10 @@ docker compose run --rm loadgen --players 10000 --rate 3000
 ```
 
 The gateway serves `GET /ws` (WebSocket), `GET /api/topology` (the same JSON,
-once) and `GET /healthz` on port 8081.
+once) and `GET /healthz` on port 8081. It takes `--nodes` (or
+`MATCHMESH_PEERS`, same format as `--peers`), `--listen` (or
+`MATCHMESH_GATEWAY_LISTEN`, default `0.0.0.0:8081`) and `--interval`, the poll
+period in milliseconds (default `500`).
 
 </details>
 
