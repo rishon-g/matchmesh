@@ -84,6 +84,14 @@ TEST(HashRingTest, AddAndRemoveNodes) {
     EXPECT_EQ(ring.node_count(), 1u);
 }
 
+TEST(HashRingTest, NodesAreListedSortedByIdWhateverTheJoinOrder) {
+    HashRing ring;
+    ring.add_node("node-c");
+    ring.add_node("node-a");
+    ring.add_node("node-b");
+    EXPECT_EQ(ring.nodes(), (std::vector<std::string>{"node-a", "node-b", "node-c"}));
+}
+
 TEST(HashRingTest, RejectsBadInput) {
     EXPECT_THROW(HashRing(0), std::invalid_argument);
     HashRing ring;
