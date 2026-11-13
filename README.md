@@ -25,7 +25,7 @@ All measured with five real node processes and the load generator sharing one 2-
 | **Correctness** | **0 players lost** across 11 crashes and 79,000 players in chaos testing, including 3 crashes during 29,000 players at 1,000/s |
 | **Latency** | **p50 0.78 ms, p99 3.07 ms** to join a queue at 1,000 players/s, including forwarding and synchronous replication |
 | **Throughput** | About **4,000 players/s** before saturating the 2 cores |
-| **Testing** | **252** C++ tests (186 also under ThreadSanitizer), 22 dashboard tests, and a WebAssembly smoke test in CI |
+| **Testing** | **253** C++ tests (187 also under ThreadSanitizer), 22 dashboard tests, and a WebAssembly smoke test in CI |
 
 ## Highlights
 
