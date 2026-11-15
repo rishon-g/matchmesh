@@ -37,5 +37,20 @@ TEST(PlacementTest, BackupIsADifferentNodeFromThePrimary) {
     EXPECT_NE(placement.primary, *placement.backup);
 }
 
+TEST(PlacementTest, BackupIsTheNextDistinctOwnerOnTheRing) {
+    HashRing ring;
+    ring.add_node("node-a");
+    ring.add_node("node-b");
+    ring.add_node("node-c");
+
+    const auto owners = ring.owners(kQueue, 2);
+    ASSERT_EQ(2u, owners.size());
+
+    const Placement placement = place(ring, 1, kQueue);
+
+    EXPECT_EQ(owners[0], placement.primary);
+    EXPECT_EQ(owners[1], placement.backup);
+}
+
 }  // namespace
 }  // namespace matchmesh::core
