@@ -364,7 +364,7 @@ docker compose exec node-a matchmesh_cli --target node-a:50051 get-lobby alice 1
 docker compose exec node-a matchmesh_cli --target node-a:50051 topology
 ./scripts/cluster_demo.sh                       # eight players, all through node-a: watch where they land
 
-# Load: --players, --rate (per second, Poisson), --threads, --seed, --json
+# Load: --targets (or MATCHMESH_TARGETS, host:port,...), --players, --rate (per second, Poisson), --threads, --seed, --json
 docker compose run --rm loadgen --players 10000 --rate 3000
 
 # Chaos: --rounds, --down (seconds), --rate, --seed, --local
