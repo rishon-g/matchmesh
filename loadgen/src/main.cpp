@@ -16,6 +16,7 @@
 // Exits 0 if every player was enqueued and every invariant holds, 1 otherwise.
 
 #include <chrono>
+#include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -80,8 +81,11 @@ bool parse_args(int argc, char** argv, Options& out) {
             }
             const std::string value = argv[++i];
             // Every other flag is a number that can't be negative, and stoul
-            // would silently wrap "-5" around to a huge count.
-            if (flag != "--targets" && flag != "--json" && value.starts_with('-')) {
+            // would silently wrap "-5" around to a huge count. It also skips
+            // leading whitespace, so " -5" has to be rejected too.
+            if (flag != "--targets" && flag != "--json" &&
+                (value.starts_with('-') ||
+                 (!value.empty() && std::isspace(static_cast<unsigned char>(value.front())) != 0))) {
                 return false;
             }
             // How much of `value` a number parser read; anything left over
