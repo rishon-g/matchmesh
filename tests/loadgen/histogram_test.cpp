@@ -166,5 +166,13 @@ TEST(HistogramTest, DurationsPrintReadably) {
     EXPECT_EQ(format_duration(3'210'000us), "3.21 s");
 }
 
+TEST(HistogramTest, DurationsSwitchUnitsAndPrecisionAtTheBoundaries) {
+    EXPECT_EQ(format_duration(999us), "999 us");
+    EXPECT_EQ(format_duration(1'000us), "1.00 ms");
+    EXPECT_EQ(format_duration(9'990us), "9.99 ms");
+    EXPECT_EQ(format_duration(10'000us), "10.0 ms");
+    EXPECT_EQ(format_duration(1'000'000us), "1.00 s");
+}
+
 }  // namespace
 }  // namespace matchmesh::loadgen
