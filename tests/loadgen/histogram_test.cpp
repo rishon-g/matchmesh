@@ -159,6 +159,19 @@ TEST(HistogramTest, RangesCoverEverySampleInPowersOfTwo) {
     EXPECT_EQ(ranges.back().count, 1u);
 }
 
+TEST(HistogramTest, ZeroSamplesGetTheirOwnZeroToOneRange) {
+    LatencyHistogram h;
+    h.record(0us);
+    h.record(1us);  // [1, 2)
+    const auto ranges = h.ranges();
+    ASSERT_EQ(ranges.size(), 2u);
+    EXPECT_EQ(ranges[0].low, 0us);
+    EXPECT_EQ(ranges[0].high, 1us);
+    EXPECT_EQ(ranges[0].count, 1u);
+    EXPECT_EQ(ranges[1].low, 1us);
+    EXPECT_EQ(ranges[1].count, 1u);
+}
+
 TEST(HistogramTest, DurationsPrintReadably) {
     EXPECT_EQ(format_duration(850us), "850 us");
     EXPECT_EQ(format_duration(1'234us), "1.23 ms");
