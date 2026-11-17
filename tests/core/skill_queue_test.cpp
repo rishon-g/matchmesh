@@ -94,6 +94,16 @@ TEST_F(SkillQueueTest, RejectsRatingsFromOtherBrackets) {
     EXPECT_EQ(queue_.enqueue({"top", 1499}, t0_), EnqueueResult::kAdded);
 }
 
+TEST(SkillQueueBracketZeroTest, AcceptsNegativeRatingsAndSortsThemFirst) {
+    // Negative ratings map to bracket 0, so that queue must take them.
+    SkillQueue queue{make_queue_key("us-west", "ranked", 0)};
+    ASSERT_EQ(queue.enqueue({"zero", 0}, TimePoint{}), EnqueueResult::kAdded);
+    ASSERT_EQ(queue.enqueue({"negative", -50}, TimePoint{}), EnqueueResult::kAdded);
+
+    ASSERT_EQ(queue.size(), 2u);
+    EXPECT_EQ(queue.begin()->player.id, "negative");
+}
+
 TEST_F(SkillQueueTest, RejectsEmptyPlayerId) {
     EXPECT_EQ(queue_.enqueue({"", 1300}, t0_), EnqueueResult::kInvalidPlayer);
     EXPECT_TRUE(queue_.empty());
