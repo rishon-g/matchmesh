@@ -129,6 +129,20 @@ TEST(HistogramTest, MergingAnEmptyHistogramChangesNothing) {
     EXPECT_EQ(h.mean(), 470us);
 }
 
+TEST(HistogramTest, MergingIntoAnEmptyHistogramTakesTheOthersStats) {
+    LatencyHistogram other;
+    other.record(40us);
+    other.record(900us);
+
+    LatencyHistogram h;
+    h.merge(other);
+
+    EXPECT_EQ(h.count(), 2u);
+    EXPECT_EQ(h.min(), 40us);  // not held at the empty histogram's 0
+    EXPECT_EQ(h.max(), 900us);
+    EXPECT_EQ(h.percentile(100), 900us);
+}
+
 TEST(HistogramTest, RangesCoverEverySampleInPowersOfTwo) {
     LatencyHistogram h;
     h.record(3us);     // [2, 4)
