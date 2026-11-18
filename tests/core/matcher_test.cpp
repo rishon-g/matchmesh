@@ -312,6 +312,15 @@ TEST(MatcherConfigTest, RejectsNonsenseSettings) {
     EXPECT_NO_THROW(Matcher("x", MatchConfig{}));
 }
 
+TEST(MatcherConfigTest, AcceptsTheSmallestValidSettings) {
+    // Duos, no widening, and a max window equal to the initial one are all allowed.
+    EXPECT_NO_THROW(Matcher("x", MatchConfig{.lobby_size = 2,
+                                             .initial_window = 0,
+                                             .widen_per_second = 0,
+                                             .max_window = 0}));
+    EXPECT_THROW(Matcher("x", MatchConfig{.lobby_size = 0}), std::invalid_argument);
+}
+
 TEST(MatcherConfigTest, ExposesTheConfigItWasBuiltWith) {
     const Matcher matcher("x", MatchConfig{.lobby_size = 6, .initial_window = 25});
     EXPECT_EQ(matcher.config().lobby_size, 6u);
