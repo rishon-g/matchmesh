@@ -199,6 +199,20 @@ TEST(HashRingTest, OwnersNeverReturnsMoreNodesThanExist) {
     EXPECT_TRUE(ring.owners("queue-1", 0).empty());
 }
 
+TEST(HashRingTest, OwnersFindsEveryNodeWithOneVirtualNodeEach) {
+    // The clockwise walk is bounded to one lap, which here is only three points.
+    HashRing ring(1);
+    ring.add_node("node-a");
+    ring.add_node("node-b");
+    ring.add_node("node-c");
+    for (int i = 0; i < 50; ++i) {
+        const std::vector<std::string> owners = ring.owners(key_name(i), 3);
+        EXPECT_EQ(std::set<std::string>(owners.begin(), owners.end()),
+                  (std::set<std::string>{"node-a", "node-b", "node-c"}))
+            << key_name(i);
+    }
+}
+
 TEST(HashRingTest, BackupTakesOverWhenTheOwnerLeaves) {
     // The second owner is exactly who inherits the key if the first leaves.
     // That's what lets a backup replica take over in Phase 5.
