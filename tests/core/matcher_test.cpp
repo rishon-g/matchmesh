@@ -68,6 +68,13 @@ TEST_F(MatcherTest, NegativeWaitIsTreatedAsNoWait) {
     EXPECT_EQ(matcher_.window_for(-3s), 50);
 }
 
+TEST(MatcherWindowTest, ZeroWideningRateKeepsTheInitialWindow) {
+    const Matcher fixed("x", MatchConfig{.initial_window = 80, .widen_per_second = 0});
+    EXPECT_EQ(fixed.window_for(0s), 80);
+    EXPECT_EQ(fixed.window_for(30s), 80);
+    EXPECT_EQ(fixed.window_for(1h), 80);
+}
+
 // ---- Edge cases: not enough players ----
 
 TEST_F(MatcherTest, EmptyQueueFormsNoLobby) {
