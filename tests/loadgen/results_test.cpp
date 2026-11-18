@@ -30,5 +30,12 @@ TEST(RunResultTest, CountsStatusesDistinctLobbiesAndRetriedPlayers) {
     EXPECT_EQ(run.players_retried(), 2u);
 }
 
+TEST(RunResultTest, LobbiesOnlyCountsPlayersWhoEndedInALobby) {
+    RunResult run;
+    run.players = {player(FinalStatus::kInLobby, "l1"), player(FinalStatus::kQueued, "l2"),
+                   player(FinalStatus::kUnknown, "l3")};
+    EXPECT_EQ(run.lobbies(), 1u);
+}
+
 }  // namespace
 }  // namespace matchmesh::loadgen
