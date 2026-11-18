@@ -1,6 +1,7 @@
 // Tests for place(): the primary is the ring's owner, the backup is the next
 // distinct node, and a one-node cluster has no backup.
 
+#include <stdexcept>
 #include <string>
 
 #include <gtest/gtest.h>
@@ -22,6 +23,10 @@ TEST(PlacementTest, OneNodeClusterHasNoBackup) {
     EXPECT_EQ("node-a", placement.primary);
     EXPECT_FALSE(placement.backup.has_value());
     EXPECT_EQ(7u, placement.epoch);
+}
+
+TEST(PlacementTest, EmptyRingIsRejected) {
+    EXPECT_THROW(static_cast<void>(place(HashRing{}, 1, kQueue)), std::invalid_argument);
 }
 
 TEST(PlacementTest, BackupIsADifferentNodeFromThePrimary) {

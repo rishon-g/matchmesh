@@ -24,7 +24,7 @@ struct Placement {
 };
 
 // The placement of `queue` on `ring`, which was built from the view numbered
-// `epoch`. The ring must have at least one node.
+// `epoch`. Throws std::invalid_argument if the ring has no nodes.
 [[nodiscard]] Placement place(const HashRing& ring, std::uint64_t epoch, const QueueKey& queue);
 
 // One node's current idea of the cluster: who it is, the view it routes by,
