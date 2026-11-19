@@ -39,7 +39,8 @@ std::vector<PlannedPlayer> make_workload(const WorkloadConfig& config) {
     if (!(config.arrivals_per_second >= 0.0) || !std::isfinite(config.arrivals_per_second)) {
         throw std::invalid_argument("arrivals_per_second must be >= 0");
     }
-    if (!(config.rating_stddev >= 0.0) || config.rating_min > config.rating_max) {
+    if (!(config.rating_stddev >= 0.0) || !std::isfinite(config.rating_stddev) ||
+        !std::isfinite(config.rating_mean) || config.rating_min > config.rating_max) {
         throw std::invalid_argument("rating range or spread makes no sense");
     }
 

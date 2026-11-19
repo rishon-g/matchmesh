@@ -115,6 +115,8 @@ TEST(WorkloadTest, NonsenseConfigsAreRejected) {
     EXPECT_THROW((void)make_workload({.arrivals_per_second = INFINITY}), std::invalid_argument);
     EXPECT_THROW((void)make_workload({.arrivals_per_second = NAN}), std::invalid_argument);
     EXPECT_THROW((void)make_workload({.rating_stddev = -1}), std::invalid_argument);
+    EXPECT_THROW((void)make_workload({.rating_stddev = INFINITY}), std::invalid_argument);
+    EXPECT_THROW((void)make_workload({.rating_mean = NAN}), std::invalid_argument);
     WorkloadConfig no_modes;
     no_modes.modes.clear();
     EXPECT_THROW((void)make_workload(no_modes), std::invalid_argument);
