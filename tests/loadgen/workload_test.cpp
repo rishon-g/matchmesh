@@ -123,6 +123,9 @@ TEST(WorkloadTest, NonsenseConfigsAreRejected) {
     WorkloadConfig unnamed_region;
     unnamed_region.regions = {{"", 1.0}};
     EXPECT_THROW((void)make_workload(unnamed_region), std::invalid_argument);
+    WorkloadConfig infinite_mode;
+    infinite_mode.modes = {{"ranked", INFINITY}};
+    EXPECT_THROW((void)make_workload(infinite_mode), std::invalid_argument);
 }
 
 }  // namespace

@@ -14,8 +14,8 @@ public:
     explicit WeightedChoice(const std::vector<std::pair<std::string, double>>& options) {
         std::vector<double> weights;
         for (const auto& [name, weight] : options) {
-            if (name.empty() || !(weight >= 0.0)) {
-                throw std::invalid_argument("every option needs a name and a weight >= 0");
+            if (name.empty() || !(weight >= 0.0) || !std::isfinite(weight)) {
+                throw std::invalid_argument("every option needs a name and a finite weight >= 0");
             }
             names_.push_back(name);
             weights.push_back(weight);
