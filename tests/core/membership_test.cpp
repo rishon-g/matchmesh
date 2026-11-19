@@ -301,6 +301,16 @@ TEST(MembershipTest, ARestartedCoordinatorRepublishesItself) {
     EXPECT_TRUE(published->lists("node-a", 12));
 }
 
+TEST(MembershipTest, AContactClaimingToBeUsCannotChangeOurIncarnation) {
+    Membership a("node-a", {"node-a", "node-b"}, TimePoint{}, {}, 7);
+    a.record_contact("node-a", TimePoint{}, 99);  // ignored: we know who we are
+    a.record_contact("node-b", TimePoint{}, 22);
+
+    const auto published = a.tick(TimePoint{});
+    ASSERT_TRUE(published.has_value());
+    EXPECT_TRUE(published->lists("node-a", 7));
+}
+
 // ---- Concurrency ----
 
 TEST(MembershipTest, SafeToUseFromManyThreadsAtOnce) {
