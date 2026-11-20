@@ -53,7 +53,8 @@ if(NOT CMAKE_CXX_FLAGS MATCHES "-fsanitize=thread")
         node/cluster_test.cpp
         node/shard_manager_test.cpp
         node/loadgen_runner_test.cpp
-        node/identity_test.cpp)
+        node/identity_test.cpp
+        node/convert_test.cpp)
     target_link_libraries(matchmesh_node_tests
         PRIVATE matchmesh_node_lib matchmesh_loadgen_runner GTest::gtest_main
                 matchmesh_warnings)
