@@ -2,6 +2,8 @@
 // edge cases.
 
 #include <chrono>
+#include <cstdint>
+#include <limits>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -73,6 +75,13 @@ TEST(MatcherWindowTest, ZeroWideningRateKeepsTheInitialWindow) {
     EXPECT_EQ(fixed.window_for(0s), 80);
     EXPECT_EQ(fixed.window_for(30s), 80);
     EXPECT_EQ(fixed.window_for(1h), 80);
+}
+
+TEST(MatcherWindowTest, ExtremeWideningRateClampsInsteadOfOverflowing) {
+    constexpr std::int32_t kMax = std::numeric_limits<std::int32_t>::max();
+    const Matcher wide("x", MatchConfig{.widen_per_second = kMax, .max_window = kMax});
+    EXPECT_EQ(wide.window_for(1s), kMax);
+    EXPECT_EQ(wide.window_for(std::chrono::hours{24 * 365}), kMax);
 }
 
 // ---- Edge cases: not enough players ----
