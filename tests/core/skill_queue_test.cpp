@@ -109,6 +109,15 @@ TEST_F(SkillQueueTest, RejectsEmptyPlayerId) {
     EXPECT_TRUE(queue_.empty());
 }
 
+TEST_F(SkillQueueTest, ChecksIdThenBracketThenDuplicates) {
+    ASSERT_EQ(queue_.enqueue({"alice", 1300}, t0_), EnqueueResult::kAdded);
+
+    // An empty ID wins over a wrong bracket, and a wrong bracket over a duplicate.
+    EXPECT_EQ(queue_.enqueue({"", 2000}, t0_), EnqueueResult::kInvalidPlayer);
+    EXPECT_EQ(queue_.enqueue({"alice", 2000}, t0_), EnqueueResult::kWrongBracket);
+    EXPECT_EQ(queue_.size(), 1u);
+}
+
 TEST_F(SkillQueueTest, CancelRemovesThePlayerAndReturnsThem) {
     ASSERT_EQ(queue_.enqueue({"alice", 1300}, t0_ + 2s), EnqueueResult::kAdded);
 
