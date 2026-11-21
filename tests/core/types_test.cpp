@@ -1,5 +1,7 @@
 // Tests for the basic types: skill brackets and queue keys.
 
+#include <cstdint>
+#include <limits>
 #include <unordered_map>
 
 #include <gtest/gtest.h>
@@ -21,6 +23,11 @@ TEST(SkillBracketTest, SplitsRatingsInto500PointBands) {
 TEST(SkillBracketTest, NegativeRatingsFallIntoBracketZero) {
     EXPECT_EQ(skill_bracket_for(-1), 0);
     EXPECT_EQ(skill_bracket_for(-750), 0);
+}
+
+TEST(SkillBracketTest, HandlesTheInt32Extremes) {
+    EXPECT_EQ(skill_bracket_for(std::numeric_limits<std::int32_t>::max()), 4294967);
+    EXPECT_EQ(skill_bracket_for(std::numeric_limits<std::int32_t>::min()), 0);
 }
 
 TEST(QueueKeyTest, MakeQueueKeyDerivesBracketFromRating) {
