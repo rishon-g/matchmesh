@@ -156,6 +156,19 @@ TEST(SnapshotTest, LobbiesAreNewestFirstOnceEachAndCapped) {
     EXPECT_EQ(doc["lobbies"][0]["queue"].s(), "eu/ranked/2");
 }
 
+TEST(SnapshotTest, LobbiesFormedAtTheSameTimeAreOrderedByDescendingId) {
+    auto a = view(1, {"node-a"});
+    add_lobby(a, "L-a", 100);
+    add_lobby(a, "L-c", 100);
+    add_lobby(a, "L-b", 100);
+    const auto doc = parse(build_snapshot({{"node-a", "a:1", a}}));
+
+    ASSERT_EQ(doc["lobbies"].size(), 3u);
+    EXPECT_EQ(doc["lobbies"][0]["id"].s(), "L-c");
+    EXPECT_EQ(doc["lobbies"][1]["id"].s(), "L-b");
+    EXPECT_EQ(doc["lobbies"][2]["id"].s(), "L-a");
+}
+
 TEST(SnapshotTest, NobodyAnsweringStillGivesAValidDocument) {
     const auto doc = parse(build_snapshot({{"node-a", "a:1", std::nullopt}}));
     EXPECT_EQ(doc["epoch"].u(), 0u);
