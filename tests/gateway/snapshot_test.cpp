@@ -109,6 +109,21 @@ TEST(SnapshotTest, ShardsFromAllNodesAreMergedCountedAndSortedRoundTheRing) {
     EXPECT_EQ(doc["nodes"][1]["queued"].u(), 7u);
 }
 
+TEST(SnapshotTest, EachShardCarriesItsQueueAndBothOwners) {
+    auto a = view(1, {"node-a", "node-b"});
+    add_shard(a, "eu", "node-a", "node-b", 3);
+    const auto doc = parse(build_snapshot({{"node-a", "a:1", a}}));
+
+    ASSERT_EQ(doc["shards"].size(), 1u);
+    const auto& shard = doc["shards"][0];
+    EXPECT_EQ(shard["queue"].s(), "eu/ranked/2");
+    EXPECT_EQ(shard["region"].s(), "eu");
+    EXPECT_EQ(shard["mode"].s(), "ranked");
+    EXPECT_EQ(shard["bracket"].u(), 2u);
+    EXPECT_EQ(shard["primary"].s(), "node-a");
+    EXPECT_EQ(shard["backup"].s(), "node-b");
+}
+
 TEST(SnapshotTest, AQueueClaimedTwiceWhileMovingIsShownOnceUnderTheRingsOwner) {
     const std::vector<std::string> members = {"node-a", "node-b"};
     core::HashRing ring;
