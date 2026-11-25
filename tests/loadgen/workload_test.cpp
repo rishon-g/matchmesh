@@ -76,6 +76,11 @@ TEST(WorkloadTest, RatingsFollowABellCurveWithinTheLimits) {
     EXPECT_NEAR(std::sqrt(sum_sq / n - mean * mean), 300.0, 10.0);
 }
 
+TEST(WorkloadTest, EqualRatingLimitsAreAcceptedAndPinEveryRating) {
+    const auto pinned = make_workload({.players = 50, .rating_min = 900, .rating_max = 900});
+    EXPECT_TRUE(std::ranges::all_of(pinned, [](const auto& p) { return p.rating == 900; }));
+}
+
 TEST(WorkloadTest, RegionsAndModesFollowTheirWeights) {
     const auto players = make_workload({.players = 20'000});
     std::map<std::string, double> regions;
