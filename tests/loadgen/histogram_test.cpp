@@ -93,6 +93,15 @@ TEST(HistogramTest, NegativeDurationsCountAsZero) {
     EXPECT_EQ(h.max(), 0us);
 }
 
+TEST(HistogramTest, SubMicrosecondPartsAreTruncated) {
+    LatencyHistogram h;
+    h.record(999ns);   // rounds down to 0 us, not up to 1 us
+    h.record(1999ns);  // 1 us
+    EXPECT_EQ(h.min(), 0us);
+    EXPECT_EQ(h.max(), 1us);
+    EXPECT_EQ(h.percentile(50), 0us);
+}
+
 TEST(HistogramTest, MergingGivesTheSameAnswersAsRecordingEverythingInOne) {
     std::mt19937 rng(3);
     std::lognormal_distribution<double> latency(7.0, 1.0);  // around 1 ms, long tail
