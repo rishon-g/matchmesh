@@ -73,7 +73,10 @@ grpc::Status with_retries(Call call, int& retries) {
 }
 
 std::string retried(int retries) {
-    return retries == 0 ? "" : ", after " + std::to_string(retries) + " retries";
+    if (retries == 0) {
+        return "";
+    }
+    return ", after " + std::to_string(retries) + (retries == 1 ? " retry" : " retries");
 }
 
 int report_error(const grpc::Status& status) {
