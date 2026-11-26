@@ -40,7 +40,7 @@ public:
     [[nodiscard]] std::chrono::microseconds max() const noexcept;
     [[nodiscard]] std::chrono::microseconds mean() const noexcept;
     // The value below which `percent` of samples fall, e.g. 99.0 for p99.
-    // percent is clamped to [0, 100]; 100 gives the exact maximum.
+    // percent is clamped to [0, 100] (NaN counts as 0); 100 gives the exact maximum.
     [[nodiscard]] std::chrono::microseconds percentile(double percent) const;
 
     // The distribution in power-of-two ranges ([1, 2) us, [2, 4) us, ...),

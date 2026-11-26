@@ -4,6 +4,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include <random>
 
 #include <gtest/gtest.h>
@@ -47,6 +48,14 @@ TEST(HistogramTest, PercentilesOutsideZeroToHundredAreClamped) {
     EXPECT_EQ(h.percentile(0), 1us);  // the smallest sample
     EXPECT_EQ(h.percentile(-5), 1us);
     EXPECT_EQ(h.percentile(150), 10us);
+}
+
+TEST(HistogramTest, ANaNPercentileIsTreatedAsZero) {
+    LatencyHistogram h;
+    for (int us = 1; us <= 10; ++us) {
+        h.record(microseconds(us));
+    }
+    EXPECT_EQ(h.percentile(std::numeric_limits<double>::quiet_NaN()), 1us);
 }
 
 TEST(HistogramTest, LargeValuesAreWithinOneSixtyFourth) {

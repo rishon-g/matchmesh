@@ -80,7 +80,8 @@ microseconds LatencyHistogram::percentile(double percent) const {
     if (count_ == 0) {
         return microseconds(0);
     }
-    percent = std::clamp(percent, 0.0, 100.0);
+    // clamp passes NaN through, and casting NaN to an integer is undefined.
+    percent = std::isnan(percent) ? 0.0 : std::clamp(percent, 0.0, 100.0);
     // The rank of the sample we want: p99 of 1,000 samples is the 990th.
     const auto rank = std::max<std::uint64_t>(
         1, static_cast<std::uint64_t>(std::ceil(percent / 100.0 * static_cast<double>(count_))));
