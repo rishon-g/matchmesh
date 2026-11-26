@@ -81,6 +81,15 @@ TEST(WorkloadTest, EqualRatingLimitsAreAcceptedAndPinEveryRating) {
     EXPECT_TRUE(std::ranges::all_of(pinned, [](const auto& p) { return p.rating == 900; }));
 }
 
+TEST(WorkloadTest, RatingsFarOutsideTheIntRangeAreClampedNotWrapped) {
+    // 2^32 + 100 would wrap to 100 if rounded to an int before clamping.
+    const auto high =
+        make_workload({.players = 10, .rating_mean = 4'294'967'396.0, .rating_stddev = 0.0});
+    EXPECT_TRUE(std::ranges::all_of(high, [](const auto& p) { return p.rating == 3'000; }));
+    const auto low = make_workload({.players = 10, .rating_mean = -1e30, .rating_stddev = 0.0});
+    EXPECT_TRUE(std::ranges::all_of(low, [](const auto& p) { return p.rating == 0; }));
+}
+
 TEST(WorkloadTest, RegionsAndModesFollowTheirWeights) {
     const auto players = make_workload({.players = 20'000});
     std::map<std::string, double> regions;

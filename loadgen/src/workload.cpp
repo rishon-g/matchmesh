@@ -61,8 +61,10 @@ std::vector<PlannedPlayer> make_workload(const WorkloadConfig& config) {
         }
         PlannedPlayer player;
         player.id = config.id_prefix + std::to_string(i);
-        player.rating = std::clamp(static_cast<int>(std::lround(rating(rng))), config.rating_min,
-                                   config.rating_max);
+        // Clamp as a double first: a draw outside int's range would wrap if cast before clamping.
+        player.rating = static_cast<int>(
+            std::clamp(std::round(rating(rng)), static_cast<double>(config.rating_min),
+                       static_cast<double>(config.rating_max)));
         player.region = region(rng);
         player.mode = mode(rng);
         player.arrives_at = std::chrono::microseconds(std::llround(clock_seconds * 1e6));
