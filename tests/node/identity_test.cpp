@@ -13,5 +13,12 @@ TEST(IdentityTest, LobbyIdPrefixUsesTheLow32BitsAsEightHexDigits) {
     EXPECT_EQ(lobby_id_prefix("node-a", 0xabcdef0000000001ULL), "node-a-00000001");
 }
 
+TEST(IdentityTest, NewIncarnationIsNeverZero) {
+    // Zero means "not using incarnations" to core::Membership.
+    for (int i = 0; i < 1000; ++i) {
+        EXPECT_NE(new_incarnation(), 0u);
+    }
+}
+
 }  // namespace
 }  // namespace matchmesh::node
