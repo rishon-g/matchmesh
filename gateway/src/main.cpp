@@ -42,7 +42,9 @@ bool parse_args(int argc, char** argv, Options& out) {
     if (const char* peers = std::getenv("MATCHMESH_PEERS"); peers != nullptr) {
         out.nodes = peers;
     }
-    if (const char* listen = std::getenv("MATCHMESH_GATEWAY_LISTEN"); listen != nullptr) {
+    // An empty value counts as unset, as it does for the node, so the default applies.
+    if (const char* listen = std::getenv("MATCHMESH_GATEWAY_LISTEN");
+        listen != nullptr && *listen != '\0') {
         out.listen = listen;
     }
     for (int i = 1; i + 1 < argc; i += 2) {
