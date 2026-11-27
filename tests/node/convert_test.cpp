@@ -50,5 +50,20 @@ TEST(ConvertTest, AnEnqueueChangeSurvivesARoundTripThroughProto) {
     EXPECT_EQ(joined->request_id, "req-9");
 }
 
+TEST(ConvertTest, ACancelChangeSurvivesARoundTripThroughProto) {
+    const core::ShardChange change{core::make_queue_key("eu", "duos", 700), 7,
+                                   core::PlayerLeft{"dave"}};
+    v1::ReplicateRequest proto;
+    to_proto(change, &proto);
+    const auto back = change_from_proto(proto);
+
+    ASSERT_TRUE(back.has_value());
+    EXPECT_EQ(back->queue, change.queue);
+    EXPECT_EQ(back->sequence, 7u);
+    const auto* left = std::get_if<core::PlayerLeft>(&back->op);
+    ASSERT_NE(left, nullptr);
+    EXPECT_EQ(left->player_id, "dave");
+}
+
 }  // namespace
 }  // namespace matchmesh::node
