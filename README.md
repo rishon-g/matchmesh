@@ -361,6 +361,7 @@ Each node takes its settings from flags or environment variables:
 # Ask any node; the reply says which node served it. The CLI retries UNAVAILABLE like a client.
 docker compose exec node-a matchmesh_cli --target node-a:50051 enqueue alice 1300 us-west ranked
 docker compose exec node-a matchmesh_cli --target node-a:50051 get-lobby alice 1300 us-west ranked
+docker compose exec node-a matchmesh_cli --target node-a:50051 cancel alice 1300 us-west ranked  # only if still waiting
 docker compose exec node-a matchmesh_cli --target node-a:50051 topology
 ./scripts/cluster_demo.sh                       # eight players, all through node-a: watch where they land
 
